@@ -1,0 +1,225 @@
+---
+title: "FixingHesoIDs"
+author: "Pieter Clauw"
+date: "11/09/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+source('/Volumes/nordborg/user/pieter.clauw/Documents/Source/Rfunctions/H.r')
+```
+
+## The solution?
+From the pictures it seems that the positions annotated to the hesoIDs are wrong.
+In teh trays, the indication for filling the trays indicates that columns 'a' to 'e' are filled from left to right, while the annotation with the hesoIDs follows columns 'a' to 'e' from right to left.
+
+```{r data}
+heso.rep2_3 <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Growth.old//RawData/hesoAnnotations_MartoJune_2018.txt', header = T, sep = '\t')
+stratification <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Setup/stratification_dates.txt', header = T)
+rep2_3 <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Growth.old/RawData/LemnaTecResults_16v62018_2017Analysis.csv', header = T, sep = ';')
+
+randomFiles <- list.files('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Setup/GrowthChamber/', pattern = 'chamberRandomisation_.*_rep', full.names = T)
+randomisations <- lapply(randomFiles, FUN = read.table, header = T, stringsAsFactors = F)
+names(randomisations) <- c('16C_rep1', '16C_rep2', '16C_rep3', '6C_rep1', '6C_rep2', '6C_rep3')
+```
+
+
+```{r functions}
+getDate <- function(timeStamp)
+{
+  if (grepl('[A,P]M', timeStamp))
+  {return(format(strptime(timeStamp, format = '%m/%d/%Y %I:%M:%S %p'), '%d.%m.%Y'))}
+  else if (!grepl('[A,P]M', timeStamp))
+  {return(format(strptime(timeStamp, format = '%d.%m.%Y %H:%M:%S'), '%d.%m.%Y'))}
+}
+
+getHour <- function(timeStamp)
+{
+  if (grepl('[A,P]M', timeStamp))
+  {return(format(strptime(timeStamp, format = '%m/%d/%Y %I:%M:%S %p'), '%H:%M'))}
+  else if (!grepl('[A,P]M', timeStamp))
+  {return(format(strptime(timeStamp, format = '%d.%m.%Y %H:%M:%S'), '%H:%M'))}
+}
+
+getExperiment <- function(date, hour)
+{
+  date <- strptime(date, format = '%d.%m.%Y')
+  hour <- strptime(hour, format = '%H:%M')
+  noon <- strptime('12:00', format = '%H:%M')
+  if (date >= rep1_6C_start & date <= rep1_6C_end){
+    return('6C_rep1')
+  }  else if (date >= rep1_16C_start & date <= rep1_16C_end){
+    return('16C_rep1')
+  } else if (date >= rep2_6C_start & date < rep2_6C_end){
+    return('6C_rep2')
+  }  else if (date == rep2_6C_end & hour < noon){
+    return('6C_rep2')
+  }  else if (date == rep2_16C_start & hour > noon){
+    return('16C_rep2')
+  }  else if (date > rep2_16C_start & date < rep2_16C_end){
+    return('16C_rep2')
+  }  else if (date == rep2_16C_end & hour < noon){
+    return('16C_rep2')
+  }  else if (date == rep3_6C_start & hour > noon){
+    return('6C_rep3')
+  }  else if (date > rep3_6C_start & date < rep3_6C_end){
+    return('6C_rep3')
+  }  else if (date == rep3_6C_end & hour < noon){
+    return('6C_rep3')
+  }  else if (date == rep3_16C_start & hour > noon){
+    return('16C_rep3')
+  }  else if (date > rep3_16C_start & date <= rep3_16C_end){
+    return('16C_rep3')
+  } else {return(NA)}
+}
+
+getDAS.decimal <- function(rep, temp, date, hour)
+{
+  #if(rep == 'rep1_re'){rep <- 'rep1'}
+  if (grepl('_re', rep)){rep <- strsplit(rep, split = '_')[[1]][1]}
+  DAS1 <- stratification$DAS1[stratification$temp == temp & stratification$rep == rep]
+  datehour <- paste(date, hour)
+  datehour <- as.POSIXlt(datehour, format = '%d.%m.%Y %H:%M')
+  DAS.dec <- as.numeric(difftime(datehour, DAS1, units = 'days')) + 1
+  if (length(DAS.dec) == 0){DAS.dec <- NA}
+  return(DAS.dec)
+}
+
+getAccession <- function(pot, exp)
+{
+  if (grepl('rep[1,2,3]_re', exp)){exp <- paste(strsplit(exp, split = '_')[[1]][c(1,2)], collapse = '_')}
+  random.e <- randomisations[[exp]]
+  random.e$pot <- paste(random.e$tray, random.e$coord, sep = '_')
+  acn <- random.e$acn[random.e$pot == pot]  
+  return(acn)
+}
+
+getH_perExp_perDAS <- function(exp, DAS)
+{
+  hData <- rep2_3.slim[rep2_3.slim$experiment == exp & rep2_3.slim$DAS == DAS, c('acn', 'Area')]
+  if (all(is.na(hData$Area))) {return(NA)}
+  else {return(H(hData)[4])}
+}
+
+getVe_perExp_perDAS <- function(exp, DAS)
+{
+  hData <- rep2_3.slim[rep2_3.slim$experiment == exp & rep2_3.slim$DAS == DAS, c('acn', 'Area')]
+  if (all(is.na(hData$Area))) {return(NA)}
+  else {return(Ve(hData))}
+}
+
+getVg_perExp_perDAS <- function(exp, DAS)
+{
+  hData <- rep2_3.slim[rep2_3.slim$experiment == exp & rep2_3.slim$DAS == DAS, c('acn', 'Area')]
+  if (all(is.na(hData$Area))) {return(NA)}
+  else {return(Vg(hData))}
+}
+
+```
+
+
+
+## Fix-it
+Adjust the hesoID annotation file, so that the corerct positions are linked to the hesoIDs.
+
+```{r fix heso annotation}
+
+
+heso.rep2_3.correct <- heso.rep2_3
+hesoCoordKey <- data.frame('wrong' = c('e', 'd', 'c', 'b', 'a'), 'right' = c('a', 'b', 'c', 'd', 'e'))
+for (i in 1:nrow(heso.rep2_3.correct))
+{
+  c.wrong <- heso.rep2_3$coordinate[i]
+  c.wrong.col <- substr(c.wrong, 1,1)
+  c.wrong.row <- substr(c.wrong, 2,2)
+  c.right.col <- hesoCoordKey$right[hesoCoordKey$wrong == c.wrong.col]
+  c.right <- paste(c.right.col, c.wrong.row, sep = '')
+  
+  heso.rep2_3.correct$coordinate[i] <- c.right
+}
+
+write.table(heso.rep2_3.correct, file = '/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Growth/hesoAnnotations_MartoJune_2018_correct.txt', row.names = F, quote = F, sep = '\t')
+```
+
+## reannotate
+time to make some pudding
+```{r reannotate}
+rep2_3.slim <- rep2_3[, c('Analysis.Label', 'Snapshot.ID.Tag', 'Snapshot.Time.Stamp', 'Area')]
+
+# add date and hour
+rep2_3.slim$date <- unlist(lapply(rep2_3.slim$Snapshot.Time.Stamp, getDate))
+rep2_3.slim$hour <- unlist(lapply(rep2_3.slim$Snapshot.Time.Stamp, getHour))
+
+# change stratification dates iinto POSIXlt format
+stratification[, (3:37)] <- apply(stratification[, c(3:37)], MARGIN = 2, function(x){as.POSIXlt(as.character(x), format = '%d.%m.%y')})
+
+# start and end dates for each experiment
+rep1_6C_start <- stratification$DAS14[stratification$rep == 'rep1' & stratification$temp == '6C']
+rep1_6C_end <- stratification$DAS35[stratification$rep == 'rep1' & stratification$temp == '6C']
+rep1_16C_start <- stratification$DAS14[stratification$rep == 'rep1' & stratification$temp == '16C']
+rep1_16C_end <- stratification$DAS35[stratification$rep == 'rep1' & stratification$temp == '16C']
+
+rep2_6C_start <- stratification$DAS14[stratification$rep == 'rep2' & stratification$temp == '6C']
+rep2_6C_end <- stratification$DAS35[stratification$rep == 'rep2' & stratification$temp == '6C']
+rep2_16C_start <- stratification$DAS14[stratification$rep == 'rep2' & stratification$temp == '16C']
+rep2_16C_end <- stratification$DAS35[stratification$rep == 'rep2' & stratification$temp == '16C']
+
+rep3_6C_start <- stratification$DAS14[stratification$rep == 'rep3' & stratification$temp == '6C']
+rep3_6C_end <- stratification$DAS35[stratification$rep == 'rep3' & stratification$temp == '6C']
+rep3_16C_start <- stratification$DAS14[stratification$rep == 'rep3' & stratification$temp == '16C']
+rep3_16C_end <- stratification$DAS35[stratification$rep == 'rep3' & stratification$temp == '16C']
+
+# annotate experiment
+rep2_3.slim$experiment <- unlist(mapply(rep2_3.slim$date, rep2_3.slim$hour, FUN = getExperiment))
+
+# are there measurements without annotated experiment or annotated as rep1
+any(is.na(rep2_3.slim$experiment))
+any(grepl('rep1', rep2_3.slim$experiment))
+
+# annotate replicate and temperature
+rep2_3.slim$replicate <- unlist(lapply(rep2_3.slim$experiment, function(exp){strsplit(exp, split = '_')[[1]][2]}))
+rep2_3.slim$temperature <- unlist(lapply(rep2_3.slim$experiment, function(exp){strsplit(exp, split = '_')[[1]][1]}))
+
+# annotate DAS
+rep2_3.slim$DAS_decimal <- unlist(mapply(rep2_3.slim$rep, rep2_3.slim$temp, rep2_3.slim$date, rep2_3.slim$hour, FUN = getDAS.decimal))
+rep2_3.slim$DAS <- floor(rep2_3.slim$DAS_decimal)
+
+# annotate hesoIDs and position 
+heso.rep2_3.correct$pot <- paste(heso.rep2_3.correct$tray, heso.rep2_3.correct$coordinate, sep = '_')
+rep2_3.slim$pot <- heso.rep2_3.correct$pot[match(rep2_3.slim$Snapshot.ID.Tag, heso.rep2_3.correct$hesoID)]
+rep2_3.slim$tray <- unlist(lapply(rep2_3.slim$pot, function(pot){strsplit(pot, split = '_')[[1]][1]}))
+rep2_3.slim$coordinate <- unlist(lapply(rep2_3.slim$pot, function(pot){strsplit(pot, split = '_')[[1]][2]}))
+
+# annotate accession
+rep2_3.slim$acn <- unlist(mapply(rep2_3.slim$pot, rep2_3.slim$experiment, FUN = getAccession))
+```
+
+
+
+
+## Pudding time
+The proof of the pudding is in the eating.
+To test, heritabilities are calcualte on the reannotated data.
+It's expected that heritabilties go up in the range of teh first replicate (around 50%)
+
+```{r heritabilities}
+experiments <- unique(rep2_3.slim$experiment)
+DASs <- unique(rep2_3.slim$DAS)
+
+h <- data.frame('experiment' = rep(experiments, each = length(DASs)), 'DAS' = rep(DASs, length(experiments)))
+h$H <- unlist(mapply(h$experiment, h$DAS, FUN = getH_perExp_perDAS))
+h$Ve <- unlist(mapply(h$experiment, h$DAS, FUN = getVe_perExp_perDAS))
+h$Vg <- unlist(mapply(h$experiment, h$DAS, FUN = getVg_perExp_perDAS))
+
+pdf('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/AllReps/Plots/heritabilities_fixedHesoAnnotation.pdf', width = 10)
+boxplot(H ~ experiment, data = h)
+dev.off()
+
+
+```
+
+
+
+
