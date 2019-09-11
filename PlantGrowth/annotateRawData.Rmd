@@ -1,0 +1,121 @@
+---
+title: "AnnotateRawData"
+author: "Pieter Clauw"
+date: "11/09/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+source('Rfunctions.R')
+```
+
+```{r data}
+# raw lemnatech data
+rep1 <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Growth/RawData/Pieter_SepttoDez_2017_RawData.csv', header = T, sep = ';')
+rep2_3 <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Growth/RawData/LemnaTecResults_16v62018_2017Analysis.csv', header = T, sep = ';')
+
+# hesoID annotations with positions
+heso.rep1 <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Growth/RawData/hesoAnnotations_SepttoDez_2017.txt', header = T, sep = '\t')
+heso.rep2_3 <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Growth/RawData/hesoAnnotations_MartoJune_2018_correct.txt', header = T, sep = '\t')
+
+# stratification dates for each experiment
+stratification <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Setup/stratification_dates.txt', header = T)
+
+# randomisation Files
+randomFiles <- list.files('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Setup/GrowthChamber/', pattern = 'chamberRandomisation_.*_rep', full.names = T)
+randomisations <- lapply(randomFiles, FUN = read.table, header = T, stringsAsFactors = F)
+names(randomisations) <- c('16C_rep1', '16C_rep2', '16C_rep3', '6C_rep1', '6C_rep2', '6C_rep3')
+
+# outliers
+outliers <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Growth/RawData/outlierList_allREps.txt', head = T)
+```
+
+```{r combine phenotype data}
+# subset to relevant columns
+overlapColnames <- c('Analysis.Label', 'Snapshot.ID.Tag', 'Snapshot.Time.Stamp', 'Area')
+rep1.slim <- rep1[, c(overlapColnames)]
+rep2_3.slim <- rep2_3[, c(overlapColnames)]
+
+#combine
+lemna <- rbind(rep1.slim, rep2_3.slim)
+```
+
+```{r experiment dates}
+stratification[, (3:37)] <- apply(stratification[, c(3:37)], MARGIN = 2, function(x){as.POSIXlt(as.character(x), format = '%d.%m.%y')})
+rep1_6C_start <- stratification$DAS14[stratification$rep == 'rep1' & stratification$temp == '6C']
+rep1_6C_end <- stratification$DAS35[stratification$rep == 'rep1' & stratification$temp == '6C']
+rep1_16C_start <- stratification$DAS14[stratification$rep == 'rep1' & stratification$temp == '16C']
+rep1_16C_end <- stratification$DAS35[stratification$rep == 'rep1' & stratification$temp == '16C']
+
+rep2_6C_start <- stratification$DAS14[stratification$rep == 'rep2' & stratification$temp == '6C']
+rep2_6C_end <- stratification$DAS35[stratification$rep == 'rep2' & stratification$temp == '6C']
+rep2_16C_start <- stratification$DAS14[stratification$rep == 'rep2' & stratification$temp == '16C']
+rep2_16C_end <- stratification$DAS35[stratification$rep == 'rep2' & stratification$temp == '16C']
+
+rep3_6C_start <- stratification$DAS14[stratification$rep == 'rep3' & stratification$temp == '6C']
+rep3_6C_end <- stratification$DAS35[stratification$rep == 'rep3' & stratification$temp == '6C']
+rep3_16C_start <- stratification$DAS14[stratification$rep == 'rep3' & stratification$temp == '16C']
+rep3_16C_end <- stratification$DAS35[stratification$rep == 'rep3' & stratification$temp == '16C']
+
+
+```
+
+
+```{r annotate meta information}
+# annotate date and hour
+lemna$date <- unlist(lapply(lemna$Snapshot.Time.Stamp, getDate))
+lemna$hour <- unlist(lapply(lemna$Snapshot.Time.Stamp, getHour))
+
+# annotate experiment
+lemna$experiment <- unlist(mapply(lemna$date, lemna$hour, FUN = getExperiment))
+
+# remove datepoints without experiment (date from first 6C experiment)
+lemna <- lemna[!is.na(lemna$experiment), ]
+
+# annotate replicate and temperature
+lemna$replicate <- unlist(lapply(lemna$experiment, function(exp){strsplit(exp, split = '_')[[1]][2]}))
+lemna$temperature <- unlist(lapply(lemna$experiment, function(exp){strsplit(exp, split = '_')[[1]][1]}))
+
+# annotate days after stratification (DAS)
+lemna$DAS_decimal <- unlist(mapply(lemna$rep, lemna$temp, lemna$date, lemna$hour, FUN = getDAS.decimal))
+lemna$DAS <- floor(lemna$DAS_decimal)
+
+# combine hesoID annotation and create pot identifiers
+heso <- rbind(heso.rep1, heso.rep2_3)
+heso$pot <- paste(heso$tray, heso$coordinate, sep = '_')
+
+# annotate potID, tray and coordinate
+lemna$pot <- heso$pot[match(lemna$Snapshot.ID.Tag, heso$hesoID)]
+lemna$tray <- unlist(lapply(lemna$pot, function(pot){strsplit(pot, split = '_')[[1]][1]}))
+lemna$coordinate <- unlist(lapply(lemna$pot, function(pot){strsplit(pot, split = '_')[[1]][2]}))
+
+# annotate accession
+lemna$acn <- unlist(mapply(lemna$pot, lemna$experiment, FUN = getAccession))
+```
+
+
+### remove outliers
+Outliers are defined as individual plants, or specific datapoints of individual plants that follow a growth trajectory of decreasing size.
+Also specific timepoints for a given individual where size suddenly drops dramatically were considered as outliers.
+Decision was based on plotting rosette area over time for each individual plants and manually going through those plots.
+```{r remove outliers}
+# define oulierIDs
+lemna$outlierID <- paste(lemna$pot, lemna$temperature, lemna$replicate, lemna$DAS, sep = '_')
+outliers$outlierID <- paste(outliers$pot, outliers$temp, outliers$rep, outliers$DAS, sep = '_')
+
+# remove outliers
+lemna.NO <- lemna[!lemna$outlierID %in% outliers$outlierID, ]
+```
+
+
+
+```{r write annotated phenotypingFile}
+write.table(lemna, file = '/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Growth/rawdata_combined_annotation.txt', quote = F, row.names = F, sep = '\t')
+write.table(lemna.NO, file = '/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Growth/rawdata_combined_annotation_NO.txt', quote = F, row.names = F, sep = '\t')
+```
+
+
+
+
