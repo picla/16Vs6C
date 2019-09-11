@@ -8,7 +8,7 @@
 library(nlme)
 library(emmeans)
 
-setwd('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/')
+setwd('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/')
 
 # read in data
 lemna <- read.table('Data/Growth/rawdata_combined_annotation_NO.txt', header = T, sep = '\t')
