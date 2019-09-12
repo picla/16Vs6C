@@ -2,8 +2,8 @@
 
 #SBATCH --time=14-00:00:00
 #SBATCH --output Logs/ultimate_QandD_poly_allReps_V3_corCAR1_correct.log
-#SBATCH --mem=40GB
-#SBATCH --nodes=2
+#SBATCH --mem=60GB
+#SBATCH --nodes=1
 #SBATCH --cpus-per-task=8
 #SBATCH --qos=long
 
