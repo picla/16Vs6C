@@ -91,3 +91,12 @@ getVg_perExp_perDAS <- function(exp, DAS)
   else {return(Vg(hData))}
 }
 
+
+# get slope of linear growth between two timepoints
+getSlope <- function(acn, temp, DAS1, DAS2, emm)
+{
+  emm.a.t.d <- emm[emm$acn == acn & emm$temp == temp & emm$DAS %in% c(DAS1, DAS2), ]
+  fit <- lm(emmean ~ DAS, data = emm.a.t.d)
+  return(fit$effects[2])
+}
+
