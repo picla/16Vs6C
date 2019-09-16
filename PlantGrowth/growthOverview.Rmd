@@ -94,6 +94,7 @@ for (a in accessions)
 ```
 Visually, the model is fitting the data very well.
 Only accession 8343 is showing a very weird growth distinction between 6ºC and 16ºC.
+Check also of there are other accesisons to remove (e.g. 5865 05 5856)?
 
 
 ## Growth over time
@@ -190,7 +191,50 @@ plot(LGR.respCurve$autumnTemp, LGR.respCurve$respCurve, col = LGR.respCurve$autu
 
 
 ```{r write data for GWAS}
+# write for each temnperature
+# rosette area 35DAS
+# linear growth rate (LGR)
+# response curve (LGR)
+# autumn temperature
+
+GWAS.Y <- data.frame('accession' = accessions)
+
+for (t in temperatures)
+{
+  # rosette areas
+  growth.35DAS.t <- growth[growth$temp == t & growth$DAS == 35, ]
+  GWAS.Y[ ,paste('rosette35DAS', t, sep = '_')] <- growth.35DAS.t$emmean[match(GWAS.Y$accession, growth.35DAS.t$acn)]
+  
+  # LGR
+  LGR.t <- LGR[LGR$temp == t, ]
+  GWAS.Y[, paste('LGR', t, sep = '_')] <- LGR.t$slope[match(GWAS.Y$accession, LGR.t$acn)]
+}
+
+# LGR response slope
+GWAS.Y$LGR_response <- LGR.respCurve$respCurve[match(GWAS.Y$accession, LGR.respCurve$acn)]
+
+# mean autumn temperature
+GWAS.Y$autumnTemp <- autumnTemp$meanAutumn[match(GWAS.Y$accession, autumnTemp$acn)]/10
+
+# write data
+write.csv(GWAS.Y, file = '/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Growth/GWAS/growthPheno.csv', row.names = F, quote = F)
+```
+
+```{r GWAS data distributions}
 
 ```
+
+
+## GWAS results
+try different kinds of GWAS
+single traits for all traits
+
+multi trait for the temperature contrasts
+
+multi trait for combinations of traits with autumn temperature
+
+
+## PCA to summarize growth
+
 
 

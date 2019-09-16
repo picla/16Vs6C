@@ -100,3 +100,12 @@ getSlope <- function(acn, temp, DAS1, DAS2, emm)
   return(fit$effects[2])
 }
 
+
+# get resonse curve of linear growth
+getRespCurve <- function(acn, growthSlopes)
+{
+  growthSlopes.a <- growthSlopes[growthSlopes$acn == acn, ]
+  fit <- lm(slope ~ temp, data = growthSlopes.a)
+  return(fit$effects[2])
+}
+
