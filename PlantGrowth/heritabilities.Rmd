@@ -9,6 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 options(stringsAsFactors = F)
 source('Rfunctions.R')
+source('../Functions/H.r')
 library(nlme)
 
 ```
@@ -37,6 +38,10 @@ DASs <- c(14:35)
 temperatures <- unique(lemna$temperature)
 experiments <- unique(lemna$experiment)
 ```
+```{r prepare data}
+lemna$Area[lemna$Area == 0] <- NA
+lemna$logArea <- log(lemna$Area)
+```
 
 
 
@@ -50,13 +55,28 @@ predictData$logArea <- predict(lemnaSlim.poly, newdata = predictData)
 ```
 
 
-## Heritabilities
-
-### Rosette area
+## Heritabilities 
+### over all replicates
+#### Rosette area
 broad-sense heritabilities of rosette area of raw data and individual predictions from the linear mixed model
-```{r}
-
+```{r raw data H}
+h.raw <- data.frame('DAS' = rep(DASs, length(temperatures)), 'temperature' =  rep(temperatures, each = length(DASs)), 'H' = NA, stringsAsFactors = F)
+h.predict <- data.frame('DAS' = rep(DASs, length(temperatures)), 'temperature' = rep(temperatures, each = length(DASs)), 'H' = NA, stringsAsFactors = F)
+for (t in temperatures)
+{
+  for (DAS in DASs)
+  {
+    lemna.d.t <- lemna[lemna$DAS == DAS & lemna$temperature == t, c('acn', 'logArea')]
+    predictData.d.t <- predictData[predictData$DAS == DAS & predictData$temperature == t, c('acn', 'logArea')]
+    h.raw$H[h.raw$DAS == DAS & h.raw$temperature == t] <- H(lemna.d.t, print = F)[4]
+    h.predict$H[h.predict$DAS == DAS & h.predict$temperature == t] <- H(predictData.d.t, print = F)[4]
+  }
+}
 ```
+
+## Heritabilities - 
+
+### per replicate
 
 
 ### Linear growth rates
