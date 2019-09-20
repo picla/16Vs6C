@@ -1,0 +1,20 @@
+---
+title: "experimentCorrelations"
+author: "Pieter Clauw"
+date: "20/09/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+```
+
+## Correlations between experiments
+In preparation of testing multitrait GWAS on the different replicates,
+we need to check how well the different experiments correlate woth one another.
+
+### correlations between temperatures
+
+
+### correlations between replicates
