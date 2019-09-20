@@ -35,9 +35,25 @@ acns_rep3 <- unique(lemna$acn[lemna$rep == 'rep3'])
 accessions <- intersect(intersect(acns_rep2, acns_rep3), acns_rep1)
 
 DASs <- c(14:35)
-temperatures <- unique(lemna$temperature)
 experiments <- unique(lemna$experiment)
+temperatures <- unique(lemna$temperature)
+replicates <- unique(lemna$replicate)
+# replicates conmbined with over all replicates (pseudo-replicate called 'overall')
+replicates.h <- c(replicates, 'overall')
+
+dataTypes <- c('raw', 'predicted')
 ```
+```{r visuals}
+tempCol <- c('blue', 'red')
+repPch <- c(15:18)
+repType <- c('b', 'b', 'b', 'l')
+visTempRep <- data.frame('temperature' = rep(temperatures, each = length(replicates.h)), 'replicate' = rep(replicates.h, length(temperatures)), 'tempCol' = rep(tempCol, each = length(replicates.h)), 'repPch' = rep(repPch, length(temperatures)), repType = rep(repType, length(temperatures)))
+
+visPredRaw <- data.frame('data' = dataTypes, 'lty' = c(1:2))
+
+```
+
+
 ```{r prepare data}
 lemna$Area[lemna$Area == 0] <- NA
 lemna$logArea <- log(lemna$Area)
@@ -52,31 +68,76 @@ predictData <- do.call(rbind, predictDataFrames)
 predictData$acn <- as.factor(as.character(predictData$acn))
 # predict
 predictData$logArea <- predict(lemnaSlim.poly, newdata = predictData)
+
+# add meta info
+predictData$replicate <- unlist(lapply(predictData$experiment, function(exp){strsplit(exp, split = '_')[[1]][2]}))
 ```
 
 
 ## Heritabilities 
-### over all replicates
 #### Rosette area
 broad-sense heritabilities of rosette area of raw data and individual predictions from the linear mixed model
-```{r raw data H}
-h.raw <- data.frame('DAS' = rep(DASs, length(temperatures)), 'temperature' =  rep(temperatures, each = length(DASs)), 'H' = NA, stringsAsFactors = F)
-h.predict <- data.frame('DAS' = rep(DASs, length(temperatures)), 'temperature' = rep(temperatures, each = length(DASs)), 'H' = NA, stringsAsFactors = F)
-for (t in temperatures)
+```{r calculate heritabilities}
+# dataframes to store heritbailities based on raw data and predicted data respectively
+h <- list()
+for (dt in dataTypes)
 {
-  for (DAS in DASs)
-  {
-    lemna.d.t <- lemna[lemna$DAS == DAS & lemna$temperature == t, c('acn', 'logArea')]
-    predictData.d.t <- predictData[predictData$DAS == DAS & predictData$temperature == t, c('acn', 'logArea')]
-    h.raw$H[h.raw$DAS == DAS & h.raw$temperature == t] <- H(lemna.d.t, print = F)[4]
-    h.predict$H[h.predict$DAS == DAS & h.predict$temperature == t] <- H(predictData.d.t, print = F)[4]
+  h[[dt]] <- data.frame('DAS' = rep(DASs, length(temperatures) * length(replicates.h)), 'temperature' =  rep(temperatures, each = length(DASs) * length(replicates.h)), 'replicate' = rep(rep(replicates.h, each = length(DASs)), length(temperatures)), 'H' = NA, stringsAsFactors = F)
+}
+
+for (dt in dataTypes)
+{
+  for (rep in replicates.h)
+  {  
+    data.r <- NULL
+    if (dt == 'raw'){data.r <- lemna}
+    else if (dt == 'predicted'){data.r <- predictData}
+    # select specific replicate data if necessary
+    if (rep != 'overall')
+    {
+      data.r <- data.r[data.r$replicate == rep, ]
+    }
+    for (t in temperatures)
+    {
+      for (DAS in DASs)
+      {
+        data.r.t.d <- data.r[data.r$temperature == t & data.r$DAS == DAS, c('acn', 'logArea')]
+        if (nrow(data.r.t.d) == 0){h[[dt]]$H[h[[dt]]$DAS == DAS & h[[dt]]$temperature == t & h[[dt]]$replicate == rep] <- NA}
+        else {h[[dt]]$H[h[[dt]]$DAS == DAS & h[[dt]]$temperature == t & h[[dt]]$replicate == rep] <- H(data.r.t.d, print = F)[4]}
+      }
+    }
   }
 }
+
+```
+```{r plot heritabilities}
+for (dt in dataTypes)
+{
+  minH <- min(h[[dt]]$H, na.rm = T)
+  maxH <- max(h[[dt]]$H, na.rm = T)
+  par(mar=c(5.1, 4.1, 4.1, 8.1), xpd=TRUE)
+  plot(NA,NA, xlim = c(DASs[1], DASs[length(DASs)]), ylim = c(minH, maxH), xlab = 'days after stratification (DAS)', ylab = 'broad sense heritability', main = dt)
+  for (t in temperatures)
+  {
+    for (rep in replicates.h)
+    {
+      # select H for given temperature and replicate
+      h.t.r <- h[[dt]][h[[dt]]$temperature == t & h[[dt]]$replicate == rep, ]
+      # plot properties
+      col <- visTempRep$tempCol[visTempRep$temperature == t]
+      pch <- visTempRep$repPch[visTempRep$replicate == rep]
+      type <- unique(visTempRep$repType[visTempRep$replicate == rep])
+      #plot lines
+      lines(h.t.r$DAS, h.t.r$H, col = col, pch = pch, type = type)
+      # legend
+      legend('topright', inset=c(-0.25,0), legend = c(temperatures, replicates.h), col = c(tempCol, rep('black', length(replicates.h))), pch = c(NA,NA, repPch[1:3], NA), lty = c(1,1, NA, NA, NA, 1))
+    }
+  }
+}
+
 ```
 
-## Heritabilities - 
 
-### per replicate
 
 
 ### Linear growth rates
