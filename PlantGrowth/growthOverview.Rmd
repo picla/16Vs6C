@@ -10,7 +10,8 @@ knitr::opts_chunk$set(echo = TRUE)
 options(stringsAsFactors = F)
 source('Rfunctions.R')
 library(nlme)
-```
+library(viridis)
+scal```
 
 
 ```{r data}
@@ -19,28 +20,61 @@ growth <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/
 lemna <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Growth/rawdata_combined_annotation_NO.txt', header = T, sep = '\t')
 autumnTemp <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/QandD2/Results/Growth/meanAutumnTemperatureCLusters.txt', head = T)
 ```
+```{r remove accessions}
+# 8343 shows a bad model fit to the data
+growth <- growth[growth$acn != 8343, ]
+
+```
+
 ```{r general variables}
 accessions <- unique(growth$acn)
 temperatures <- unique(growth$temp)
 minDAS <- min(growth$DAS)
 maxDAS <- max(growth$DAS)
-
-# TODO: replace by legend in 'autumn temperature'
-autumnTempClust_Col <- data.frame(autumnTempClust = unique(growth$autumnTempClust), autumnTempCol = NA)
-autumnTempClust_Col$autumnTempCol <- growth$autumnTempCol[match(autumnTempClust_Col$autumnTempClust, growth$autumnTempClust)]
-autumnTempClust_Col <- autumnTempClust_Col[order(autumnTempClust_Col$autumnTempClust), ]
-
 ```
 
 ```{r autumn temperature}
+autumnTemp$meanAutumn <- autumnTemp$meanAutumn / 10
+
 autumnTempColours <- rainbow(6, s = 0.8, v = 1, start = 0.05, end = 0.78)
 growth$autumnTempClust <- autumnTemp$tmeanAutumnClustTemp[match(growth$acn, autumnTemp$acn)]
 growth$autumnTempClust <- factor(growth$autumnTempClust, levels = c('4C', '7C', '9C', '11C', '13C', '17C'), ordered = T)
-growth$autumnTempCol <- autumnTempColours[growth$autumnTempClust]
-growth$autumnTemp <- autumnTemp$meanAutumn[match(growth$acn, autumnTemp$acn)]/10
+growth$autumnTemp <- autumnTemp$meanAutumn[match(growth$acn, autumnTemp$acn)]
+
+
+
 
 legend.df <- data.frame('cluster' = sort(unique(growth$autumnTempClust)), 'col' = NA)
 legend.df$col <- growth$autumnTempCol[match(legend.df$cluster, growth$autumnTempClust)]
+
+# TODO: replace by legend in 'autumn temperature'
+autumnTempClust_Col <- data.frame('autumnTempClust' = unique(growth$autumnTempClust), 'autumnTempCol' = NA)
+autumnTempClust_Col$autumnTempCol <- growth$autumnTempCol[match(autumnTempClust_Col$autumnTempClust, growth$autumnTempClust)]
+autumnTempClust_Col <- autumnTempClust_Col[order(autumnTempClust_Col$autumnTempClust), ]
+```
+
+```{r visuals}
+tempCol <- c('red', 'blue')
+tempLty <- c(1, 2)
+visTemp <- data.frame('temperature' = temperatures, 'tempCol' = tempCol, 'tempLty' = tempLty)
+
+# temperatureRange
+tempRange <- seq(-10, 20, by = 1)
+
+# get plasma colours fro temperature on continuous scale
+autumnTemp$autumnTempInterval <- findInterval(autumnTemp$meanAutumn, tempRange)
+autumnTempColours.cte <- plasma(length(tempRange))
+autumnTemp$autumnTempCol <- autumnTempColours.cte[autumnTemp$autumnTempInterval]
+# add mean autumn temperature colours to growth data
+growth$autumnTempCol <- autumnTemp$autumnTempCol[match(growth$autumnTemp, autumnTemp$meanAutumn)]
+
+# provide legend info for autumn temperature colours on continuous scale
+autumnTemp.legend <- data.frame('autumnTemp' = tempRange, 'autumnTempCol' = NA)
+autumnTemp.legend$autumnTempCol <- autumnTempColours.cte[c(1:length(tempRange))]
+
+#TEST#
+plot(autumnTemp$meanAutumn, autumnTemp$latitude, col = autumnTemp$autumnTempCol)
+gradientLegend(valRange = autumnTemp.legend$autumnTemp, color = autumnTemp.legend$autumnTempCol, pos = 0.225, side = 3, inside = T, pos.num = 1)
 ```
 
 
@@ -97,12 +131,14 @@ Only accession 8343 is showing a very weird growth distinction between 6ºC and 
 Check also of there are other accesisons to remove (e.g. 5865 05 5856)?
 
 
+
 ## Growth over time
 
 
 ```{r rosette area over time 16vs6C}
 minArea <- min(growth$emmean)
 maxArea <- max(growth$emmean)
+# plot temperatures separately
 for (t in temperatures)
 {
   pdf(paste('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/Plots/logArea_overtime_tempclustCol_', t, '.pdf', sep = ''), height = 5, width = 14)
@@ -113,9 +149,31 @@ for (t in temperatures)
     col = unique(growth.t.a$autumnTempCol)
     lines(growth.t.a$DAS, growth.t.a$emmean, col = col)
   }
-  legend('topleft', legend = autumnTempClust_Col$autumnTempClust, col = autumnTempClust_Col$autumnTempCol, lty = 1, bty = 'n')
+  #legend('topleft', legend =legend.df$cluster, col = legend.df$col, lty = 1, bty = 'n')
+  gradientLegend(valRange = autumnTemp.legend$autumnTemp, color = autumnTemp.legend$autumnTempCol, pos = 0.15, side = 3, inside = T, pos.num = 1, n.seg = 4)
+  text(x= 16.5, y = 10.65, labels = expression(paste('autumn temperature (',degree~C,')')))
   dev.off()
 }
+
+# plot temperatures together
+pdf('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/Plots/logArea_overtime_tempclustCol_16C_6C.pdf', height = 5, width = 14)
+plot(NA, NA, xlim = c(minDAS, maxDAS), ylim = c(minArea, maxArea), xlab = 'DAS (days after stratification)', ylab = 'log(rosette area)')
+for (t in temperatures)
+{
+  
+  for (a in accessions)
+  {
+    growth.t.a <- growth[growth$temp == t & growth$acn == a, ]
+    col = unique(growth.t.a$autumnTempCol)
+    lty = visTemp$tempLty[visTemp$temperature == t]
+    lines(growth.t.a$DAS, growth.t.a$emmean, col = col, lty = lty)
+  }
+}
+gradientLegend(valRange = autumnTemp.legend$autumnTemp, color = autumnTemp.legend$autumnTempCol, pos = 0.15, side = 3, inside = T, pos.num = 1, n.seg = 4)
+text(x= 16.5, y = 10.65, labels = expression(paste('autumn temperature (',degree~C,')')))
+legend(x = 13.5, y = 10, legend = visTemp$temperature, lty = visTemp$tempLty,bty = 'n')
+dev.off()
+
 ```
 
 
@@ -132,7 +190,7 @@ getSlope.14.35 <- function(acn, temp)
 LGR <- data.frame(acn = rep(accessions, length(temperatures)), temp = rep(temperatures, each = length(accessions)))
 LGR$slope <- mapply(LGR$acn, LGR$temp, FUN = getSlope.14.35)
 LGR$autumnTempCol <- growth$autumnTempCol[match(LGR$acn, growth$acn)]
-LGR$autmnTemp <- autumnTemp$meanAutumn[match(LGR$acn, autumnTemp$acn)]/10
+LGR$autmnTemp <- autumnTemp$meanAutumn[match(LGR$acn, autumnTemp$acn)]
 ```
 
 
@@ -146,11 +204,12 @@ for (t in temperatures)
 {
   LGR.t <- LGR[LGR$temp == t, ]
   pdf(paste('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/Plots/linearGrowth_14_35DAS', t, 'autumnTemperature.pdf', sep = '_'))
-  plot(LGR.t$autmnTemp, LGR.t$slope, col = LGR.t$autumnTempCol, xlab = expression(paste('autumn temperature (',degree~C,')')), pch = 19, ylab = 'growth rate (14-35DAS)', cex.axis = 1.3, cex.lab = 1.3)
+  plot(LGR.t$autmnTemp, LGR.t$slope, col = LGR.t$autumnTempCol, xlab = expression(paste('autumn temperature (',degree~C,')')), pch = 19, ylab = 'growth rate (14-35DAS)', cex.axis = 1.3, cex.lab = 1.3, xlim = c(-6, 20), xaxs = 'i')
   abline(lm(LGR.t$slope ~ LGR.t$autmnTemp))
   ct <- cor.test(LGR.t$autmnTemp, LGR.t$slope)
   text(x = par('usr')[1], y = par('usr')[4], paste('p: ', format.pval(ct$p.value, digits = 3, eps = 0.0001, nsmall = 4), sep = '' ), adj = c(-0.25 ,1.25))
   text(x = par('usr')[1], y = par('usr')[4], paste('r: ', round(ct$estimate, 4), sep = '' ), adj = c(-0.275 ,2.75))
+  gradientLegend(valRange = autumnTemp.legend$autumnTemp, color = autumnTemp.legend$autumnTempCol, pos = 0.5 - (2.25/30), length = 30/26, side = 1, inside = T, pos.num = 3, n.seg = 1, coords = F, depth = 0.01)
   dev.off()
 }
 ```
@@ -168,24 +227,26 @@ for (acn in unique(LGR$acn))
   points(LGR.a$temp, LGR.a$slope, col = LGR.a$autumnTempCol)
   lines(LGR.a$temp, LGR.a$slope, col = LGR.a$autumnTempCol)
 }
-legend('topright', legend = legend.df$cluster, col = legend.df$col, pch = rep(1, 6), bty = 'n', ncol = 2)
+gradientLegend(valRange = autumnTemp.legend$autumnTemp, color = autumnTemp.legend$autumnTempCol, pos = 0.8, side = 3, inside = T, pos.num = 1, n.seg=4)
+text(x = 2.15, y = 2.75, labels = expression(paste('autumn temperature (',degree~C,')')))
 axis(side = 1, at = c(1, 2), labels = c('16C', '6C'), cex.axis = 1.2)
 dev.off()
 ```
 ```{r calculate LGR response slope}
 LGR.respCurve <- data.frame('acn' = accessions, respCurve = NA)
 LGR.respCurve$respCurve <- unlist(lapply(LGR.respCurve$acn, FUN = getRespCurve, growthSlopes = LGR))
-LGR.respCurve$autumnTemp <- autumnTemp$meanAutumn[match(LGR.respCurve$acn, autumnTemp$acn)]/10
+LGR.respCurve$autumnTemp <- autumnTemp$meanAutumn[match(LGR.respCurve$acn, autumnTemp$acn)]
 LGR.respCurve$autumnTempCol <- growth$autumnTempCol[match(LGR.respCurve$acn, growth$acn)]
 ```
 
 ```{r LGR response slope vs autumn temperature}
 pdf(paste('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/Plots/linearGrowth_14_35DAS_responseslope_VS_autumnTemperature.pdf', sep = ''))
-plot(LGR.respCurve$autumnTemp, LGR.respCurve$respCurve, col = LGR.respCurve$autumnTempCol, xlab = expression(paste('autumn temperature (',degree~C,')')), pch = 19, ylab = 'response slope', cex.axis = 1.3, cex.lab = 1.3)
+plot(LGR.respCurve$autumnTemp, LGR.respCurve$respCurve, col = LGR.respCurve$autumnTempCol, xlab = expression(paste('autumn temperature (',degree~C,')')), pch = 19, ylab = 'response slope', cex.axis = 1.3, cex.lab = 1.3, xlim = c(-6, 20))
   abline(lm(LGR.respCurve$respCurve ~ LGR.respCurve$autumnTemp))
   ct <- cor.test(LGR.respCurve$autumnTemp, LGR.respCurve$respCurve)
   text(x = par('usr')[1], y = par('usr')[4], paste('p: ', format.pval(ct$p.value, digits = 3, eps = 0.0001, nsmall = 4), sep = '' ), adj = c(-0.25 ,1.25))
   text(x = par('usr')[1], y = par('usr')[4], paste('r: ', round(ct$estimate, 4), sep = '' ), adj = c(-0.275 ,2.75))
+  gradientLegend(valRange = autumnTemp.legend$autumnTemp, color = autumnTemp.legend$autumnTempCol, pos = 0.5 - (2.25/30), length = 30/26, side = 1, inside = T, pos.num = 3, n.seg = 1, coords = F, depth = 0.01)
   dev.off()
 ```
 
@@ -214,7 +275,7 @@ for (t in temperatures)
 GWAS.Y$LGR_response <- LGR.respCurve$respCurve[match(GWAS.Y$accession, LGR.respCurve$acn)]
 
 # mean autumn temperature
-GWAS.Y$autumnTemp <- autumnTemp$meanAutumn[match(GWAS.Y$accession, autumnTemp$acn)]/10
+GWAS.Y$autumnTemp <- autumnTemp$meanAutumn[match(GWAS.Y$accession, autumnTemp$acn)]
 
 # write data
 write.csv(GWAS.Y, file = '/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Growth/GWAS/growthPheno.csv', row.names = F, quote = F)
