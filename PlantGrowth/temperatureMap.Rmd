@@ -1,0 +1,62 @@
+---
+title: "autumnTemperatureMap"
+author: "Pieter Clauw"
+date: "25/09/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(raster)
+library(graticule)
+```
+
+```{r data}
+meta <- read.csv('/Volumes/nordborg/user/pieter.clauw/Documents/Source/Accessions/1001genomes-accessions.csv')
+```
+
+
+```{r get climate data}
+#tmean <- getData("worldclim", var = "tmean", res = 2.5)
+#tmean9 <- raster(paste(getwd(), "/wc2-5/tmean9.bil", sep = ""))
+#tmean10 <- raster(paste(getwd(), "/wc2-5/tmean10.bil", sep = ""))
+#tmean11 <- raster(paste(getwd(), "/wc2-5/tmean11.bil", sep = ""))
+
+tmean9 <- raster("/Volumes/nordborg/user/pieter.clauw/Documents/Source/WorldClim/tmean_10m_bil/tmean9.bil", sep = "")
+tmean10 <- raster("/Volumes/nordborg/user/pieter.clauw/Documents/Source/WorldClim/tmean_10m_bil/tmean10.bil", sep = "")
+tmean11 <- raster("/Volumes/nordborg/user/pieter.clauw/Documents/Source/WorldClim/tmean_10m_bil/tmean11.bil", sep = "")
+
+tmeanFall <- mean(tmean9, tmean10, tmean11)/10
+```
+
+```{r get accessions}
+accessions <- read.table("/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Setup/accessionList.rep1.2.3.txt", header = T)
+accessions <- na.omit(accessions)
+acn_coords <- na.omit(data.frame('latitude' = meta$latitude[match(accessions$x, meta$id)], 'longitude' = meta$longitude[match(accessions$x, meta$id)]))
+coordinates(acn_coords) <- ~longitude+latitude
+proj4string(acn_coords) <- CRS("+proj=longlat +ellps=WGS84 +towgs84=0,0,0,0,0,0,0 +no_defs")
+#+init=epsg:4326 +proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs +towgs84=0,0,0
+```
+
+```{r define mapping area}
+# map edges
+map_coords <- c(-20, 51, 30, 71)
+# projection
+map_proj <- CRS("+proj=laea +lat_0=52 +lon_0=10 +x_0=4321000 +y_0=3210000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs")
+
+# crop climate data to map
+tmeanFall.c <- crop(tmeanFall, map_coords)
+plot(tmeanFall.c)
+
+# crop acession map
+acn_coords.c <- crop(acn_coords, map_coords)
+
+# adjust coordinates to projection
+tmeanFall.c.proj <- projectRaster(tmeanFall.c, crs = map_proj)
+acn_coords.c.proj <- spTransform(acn_coords.c, map_proj)
+```
+
+
+
+
