@@ -14,20 +14,12 @@ library(graticule)
 
 ```{r data}
 meta <- read.csv('/Volumes/nordborg/user/pieter.clauw/Documents/Source/Accessions/1001genomes-accessions.csv')
+plotPath <- '/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/temperatureMap.pdf'
 ```
 
 
 ```{r get climate data}
-#tmean <- getData("worldclim", var = "tmean", res = 2.5)
-#tmean9 <- raster(paste(getwd(), "/wc2-5/tmean9.bil", sep = ""))
-#tmean10 <- raster(paste(getwd(), "/wc2-5/tmean10.bil", sep = ""))
-#tmean11 <- raster(paste(getwd(), "/wc2-5/tmean11.bil", sep = ""))
-
-tmean9 <- raster("/Volumes/nordborg/user/pieter.clauw/Documents/Source/WorldClim/tmean_10m_bil/tmean9.bil", sep = "")
-tmean10 <- raster("/Volumes/nordborg/user/pieter.clauw/Documents/Source/WorldClim/tmean_10m_bil/tmean10.bil", sep = "")
-tmean11 <- raster("/Volumes/nordborg/user/pieter.clauw/Documents/Source/WorldClim/tmean_10m_bil/tmean11.bil", sep = "")
-
-tmeanFall <- mean(tmean9, tmean10, tmean11)/10
+tmeanFall <- raster("/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/QandD2/Data/Climate/wc2-5/tmeanFall_Dec.V2.grd", package="raster")
 ```
 
 ```{r get accessions}
@@ -38,25 +30,71 @@ coordinates(acn_coords) <- ~longitude+latitude
 proj4string(acn_coords) <- CRS("+proj=longlat +ellps=WGS84 +towgs84=0,0,0,0,0,0,0 +no_defs")
 #+init=epsg:4326 +proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs +towgs84=0,0,0
 ```
+```{r temperature colours}
+tempRange <- seq(-10, 20, by = 1)
+autumnTempColours.cte <- plasma(length(tempRange))
+```
 
 ```{r define mapping area}
 # map edges
-map_coords <- c(-20, 51, 30, 71)
+map_coords <- c(-30, 90, 30, 75)
 # projection
 map_proj <- CRS("+proj=laea +lat_0=52 +lon_0=10 +x_0=4321000 +y_0=3210000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs")
 
 # crop climate data to map
 tmeanFall.c <- crop(tmeanFall, map_coords)
-plot(tmeanFall.c)
-
 # crop acession map
 acn_coords.c <- crop(acn_coords, map_coords)
 
 # adjust coordinates to projection
 tmeanFall.c.proj <- projectRaster(tmeanFall.c, crs = map_proj)
 acn_coords.c.proj <- spTransform(acn_coords.c, map_proj)
+
+# add min and max tenmperatures to colouring
+breaks <- tempRange
+col <- autumnTempColours.cte
+if (min(getValues(tmeanFall.c.proj), na.rm = T) < min(tempRange))
+{
+  breaks <- c(min(getValues(tmeanFall.c.proj), na.rm = T), breaks)
+  col <- c(autumnTempColours.cte[1], col)
+}
+if (max(getValues(tmeanFall.c.proj), na.rm = T) > max(tempRange))
+{
+  breaks <- c(breaks, max(getValues(tmeanFall.c.proj), na.rm = T))
+  col <- c(col, autumnTempColours.cte[length(autumnTempColours.cte)])
+}
+
+plot(tmeanFall.c, breaks = breaks, col = col)
+
+
+
+
 ```
 
+
+```{r create latitude and longitude lines}
+lons <- seq(-30, 91, by=10)
+lats <- seq(30, 76, by=5)
+xl <-  range(lons)
+yl <- range(lats)
+par_mer <- graticule(lons, lats, proj=map_proj)
+par_mer_labs <- graticule_labels(lons, lats, 91.5, 29.5, proj=map_proj)
+``` 
+
+```{r plot}
+pdf(plotPath, useDingbats = FALSE)
+plot(tmeanFall.c.proj, axes = F, col = col, breaks = breaks)
+lines(par_mer, col='black', lwd=0.5)
+points(acn_coords.c.proj, pch = 16, cex = 0.6, lwd = 0.5)
+#points(acn_coords.c.proj, pch = 16, col = acn_coords.c.proj$colour, cex = 0.5)
+text(par_mer_labs, lab=parse(text=par_mer_labs$lab), cex=0.6, xpd=T)
+dev.off()
+```
+
+# PLOT #
+pdf(plotPath, useDingbats = FALSE)
+
+  ev.off()
 
 
 
