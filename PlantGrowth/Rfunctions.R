@@ -109,3 +109,22 @@ getRespCurve <- function(acn, growthSlopes)
   return(fit$effects[2])
 }
 
+# predict individual rosette areas from model
+predictData.PerExperiment <- function(experiment)
+{
+  random.e <- randomisations[[experiment]]
+  random.e <- random.e[random.e$acn %in% accessions, ]
+  random.e$experiment <- experiment
+  random.e$temp <- strsplit(experiment, split = '_')[[1]][1]
+  random.e$ID <- paste(random.e$tray, random.e$coord, random.e$experiment, sep = '_')
+  potNR <- length(random.e$ID)
+  DASnr <- length(DASs)
+  
+  predictData.e <- data.frame('acn' = rep(random.e$acn, DASnr),
+                              'DAS' = rep(DASs, each = potNR),
+                              'temperature' = rep(random.e$temp, DASnr),
+                              'ID' = rep(random.e$ID, DASnr),
+                              'experiment' = rep(random.e$experiment, DASnr), stringsAsFactors = F)
+}
+
+
