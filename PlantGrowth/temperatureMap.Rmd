@@ -83,7 +83,7 @@ par_mer_labs <- graticule_labels(lons, lats, 91.5, 29.5, proj=map_proj)
 
 ```{r plot}
 pdf(plotPath, useDingbats = FALSE)
-plot(tmeanFall.c.proj, axes = F, col = col, breaks = breaks)
+plot(tmeanFall.c.proj, axes = F, col = col, breaks = breaks, box = F)
 lines(par_mer, col='black', lwd=0.5)
 points(acn_coords.c.proj, pch = 16, cex = 0.6, lwd = 0.5)
 #points(acn_coords.c.proj, pch = 16, col = acn_coords.c.proj$colour, cex = 0.5)
