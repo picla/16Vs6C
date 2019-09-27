@@ -11,7 +11,7 @@ options(stringsAsFactors = F)
 source('Rfunctions.R')
 library(nlme)
 library(viridis)
-scal```
+```
 
 
 ```{r data}
@@ -141,7 +141,7 @@ maxArea <- max(growth$emmean)
 # plot temperatures separately
 for (t in temperatures)
 {
-  pdf(paste('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/Plots/logArea_overtime_tempclustCol_', t, '.pdf', sep = ''), height = 5, width = 14)
+  pdf(paste('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/Plots/logArea_overtime_tempclustCol_', t, '.pdf', sep = ''), height = 5, width = 14, useDingbats = FALSE)
   plot(NA, NA, xlim = c(minDAS, maxDAS), ylim = c(minArea, maxArea), xlab = 'DAS (days after stratification)', ylab = 'log(rosette area)')
   for (a in accessions)
   {
@@ -156,7 +156,7 @@ for (t in temperatures)
 }
 
 # plot temperatures together
-pdf('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/Plots/logArea_overtime_tempclustCol_16C_6C.pdf', height = 5, width = 14)
+pdf('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/Plots/logArea_overtime_tempclustCol_16C_6C.pdf', height = 5, width = 14, useDingbats = FALSE)
 plot(NA, NA, xlim = c(minDAS, maxDAS), ylim = c(minArea, maxArea), xlab = 'DAS (days after stratification)', ylab = 'log(rosette area)')
 for (t in temperatures)
 {
@@ -203,7 +203,7 @@ LGR$autmnTemp <- autumnTemp$meanAutumn[match(LGR$acn, autumnTemp$acn)]
 for (t in temperatures)
 {
   LGR.t <- LGR[LGR$temp == t, ]
-  pdf(paste('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/Plots/linearGrowth_14_35DAS', t, 'autumnTemperature.pdf', sep = '_'))
+  pdf(paste('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/Plots/linearGrowth_14_35DAS', t, 'autumnTemperature.pdf', sep = '_'), useDingbats = FALSE)
   plot(LGR.t$autmnTemp, LGR.t$slope, col = LGR.t$autumnTempCol, xlab = expression(paste('autumn temperature (',degree~C,')')), pch = 19, ylab = 'growth rate (14-35DAS)', cex.axis = 1.3, cex.lab = 1.3, xlim = c(-6, 20), xaxs = 'i')
   abline(lm(LGR.t$slope ~ LGR.t$autmnTemp))
   ct <- cor.test(LGR.t$autmnTemp, LGR.t$slope)
@@ -218,7 +218,7 @@ for (t in temperatures)
 ```{r plot LGR response curve}
 minSlope <- min(LGR$slope)
 maxSlope <- max(LGR$slope)
-pdf(paste('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/Plots/linearGrowth_14_35DAS_responsecurve.pdf', sep = ''))
+pdf(paste('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/Plots/linearGrowth_14_35DAS_responsecurve.pdf', sep = ''), useDingbats = FALSE)
 plot(NA, NA, xlim = c(0.5, 2.5), ylim = c(minSlope, maxSlope), xaxt = 'n', xlab = '', ylab = ' growth rate (14-35DAS)', cex.axis = 1.2, cex.lab = 1.2)
 for (acn in unique(LGR$acn))
 {
@@ -240,7 +240,7 @@ LGR.respCurve$autumnTempCol <- growth$autumnTempCol[match(LGR.respCurve$acn, gro
 ```
 
 ```{r LGR response slope vs autumn temperature}
-pdf(paste('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/Plots/linearGrowth_14_35DAS_responseslope_VS_autumnTemperature.pdf', sep = ''))
+pdf(paste('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/Plots/linearGrowth_14_35DAS_responseslope_VS_autumnTemperature.pdf', sep = ''), useDingbats = FALSE)
 plot(LGR.respCurve$autumnTemp, LGR.respCurve$respCurve, col = LGR.respCurve$autumnTempCol, xlab = expression(paste('autumn temperature (',degree~C,')')), pch = 19, ylab = 'response slope', cex.axis = 1.3, cex.lab = 1.3, xlim = c(-6, 20))
   abline(lm(LGR.respCurve$respCurve ~ LGR.respCurve$autumnTemp))
   ct <- cor.test(LGR.respCurve$autumnTemp, LGR.respCurve$respCurve)
