@@ -114,7 +114,7 @@ for (dt in dataTypes)
 {
   minH <- min(h[[dt]]$H, na.rm = T)
   maxH <- max(h[[dt]]$H, na.rm = T)
-  pdf(paste('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/Plots/heritbailities_', dt, '.pdf', sep = ''), useDingbats = F, width = 14)
+  pdf(paste('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/Plots/heritbailities_', dt, '.pdf', sep = ''), useDingbats = F, width = 14, height = 5)
   par(mar=c(5.1, 4.1, 4.1, 8.1), xpd=TRUE)
   plot(NA,NA, xlim = c(DASs[1], DASs[length(DASs)]), ylim = c(minH, maxH), xlab = 'days after stratification (DAS)', ylab = 'broad sense heritability', main = dt)
   for (t in temperatures)

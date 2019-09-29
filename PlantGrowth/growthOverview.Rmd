@@ -198,6 +198,8 @@ LGR$autmnTemp <- autumnTemp$meanAutumn[match(LGR$acn, autumnTemp$acn)]
 ## Response curves
 
 ## correlation with autumn temperature
+### rosette areas at 6C and 16C
+
 ### LGR at 6C and 16C
 ```{r LGR autumnTemp}
 for (t in temperatures)
