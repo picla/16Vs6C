@@ -92,12 +92,23 @@ getVg_perExp_perDAS <- function(exp, DAS)
 }
 
 
-# get slope of linear growth between two timepoints
-getSlope <- function(acn, temp, DAS1, DAS2, emm)
+# get slope of linear growth between two timepoints, per accession
+getSlope.acn <- function(acn, temp, DAS1, DAS2, emm)
 {
   emm.a.t.d <- emm[emm$acn == acn & emm$temp == temp & emm$DAS %in% c(DAS1, DAS2), ]
   fit <- lm(emmean ~ DAS, data = emm.a.t.d)
   return(fit$effects[2])
+}
+
+# get slope of linear growth betwene tow timepoints, per individual
+getSlope.ind <- function(ID, DAS1, DAS2, growth)
+{
+  growth.ind <- growth[growth$ID == ID & growth$DAS %in% c(DAS1, DAS2), ]
+  if (any(is.na(growth.ind$logArea))){return(NA)}
+  else{
+  fit <- lm(logArea ~ DAS, data = growth.ind)
+  return(fit$effects[2])
+  }
 }
 
 

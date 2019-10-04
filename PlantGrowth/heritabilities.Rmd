@@ -140,10 +140,44 @@ for (dt in dataTypes)
 
 
 
-
-
 ### Linear growth rates
+```{r LGR 14-35DAS}
+getSlope.ind.14.35 <- function(ID)
+{
+  getSlope.ind(ID, DAS1 = 14, DAS2 = 35, growth = predictData)
+}
+```
 
+```{r calculate LGR}
+LGR <- data.frame(ID =unique(predictData$ID), slope = NA)
+LGR$slope <- mapply(LGR$ID, FUN = getSlope.ind.14.35)
+
+LGR$acn <- predictData$acn[match(LGR$ID, predictData$ID)]
+LGR$temperature <- predictData$temperature[match(LGR$ID, predictData$ID)]
+LGR$replicate <- predictData$replicate[match(LGR$ID, predictData$ID)]
+LGR$experiment <- predictData$experiment[match(LGR$ID, predictData$ID)]
+```
+```{r calculate heritabilities}
+# dataframes to store heritabilities based on raw data and predicted data respectively
+h.lgr <- data.frame('temperature' =  rep(temperatures, each = length(replicates.h)), 'replicate' = rep(replicates.h, length(temperatures)), 'H' = NA, stringsAsFactors = F)
+
+for (rep in replicates.h)
+{  
+  data.r <- LGR
+  # select specific replicate data if necessary
+  if (rep != 'overall')
+  {
+    data.r <- data.r[data.r$replicate == rep, ]
+  }
+  for (t in temperatures)
+  {
+    data.r.t <- data.r[data.r$temperature == t, c('acn', 'slope')]
+    if (nrow(data.r.t) == 0){h.lgr$H[h.lgr$temperature == t & h.lgr$replicate == rep] <- NA}
+    else {h.lgr$H[h.lgr$temperature == t & h.lgr$replicate == rep] <- H(data.r.t, print = F)[4]}
+  }
+}
+
+```
 
 
 
