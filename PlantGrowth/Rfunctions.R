@@ -139,3 +139,15 @@ predictData.PerExperiment <- function(experiment)
 }
 
 
+# plot a combined histogram
+plotComboHist <- function(DF)
+{
+  
+  
+}
+  
+  
+
+
+
+

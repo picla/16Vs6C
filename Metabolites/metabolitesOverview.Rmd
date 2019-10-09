@@ -1,0 +1,111 @@
+---
+title: "metabolitesOverview"
+author: "Pieter Clauw"
+date: "08/10/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+source('../Functions/H.r')
+knitr::opts_knit$set(root.dir = "/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/")
+library(tidyverse)
+library(kableExtra)
+```
+
+## Metabilite Overview
+Exploration of the metabolite data of 250 accessions in two temperatures (16ºC and 6ºC),
+within the scope of running GWAS analyses.
+Both single trait and multitrait (both temperatures) will be run.
+
+
+```{r Data, include = F}
+dist.metabol <- read_csv('Data/Metabolites/metabolic_distance.csv')
+dist.inner <- read_csv('Data/Metabolites/innerdistance.csv')
+metabol.acn <- read_csv('Data/Metabolites/metabolites_accessions.csv')
+metabol.sample <- read_csv('Data/Metabolites/metabolites.csv')
+```
+
+```{r datacleansing, include = F}
+dist.metabol <- select(dist.metabol, accession, distance)
+dist.inner <- rename(dist.inner, temperature = condition, distance = dist) %>% select(accession, temperature, distance)
+metabol.acn <- select(metabol.acn, -(X1), temperature = condition) 
+metabol.sample <- select(metabol.sample, -(X1), temperature = condition) %>% select(sample, accession, temperature, experiment, everything())
+```
+
+```{r general variables}
+metabolites <- names(select(metabol.acn, -(c(accession, temperature))))
+temperatures <- c('16C', '6C')
+```
+
+
+## Distributions
+### metabolic distance
+```{r metabol distance hist}
+ggplot(dist.metabol, aes(distance)) +
+  geom_histogram(bins = 100, fill = 'green', alpha = 0.5) +
+  labs(x = 'metabolic distance', title = 'metabolic distance between 16ºC and 6ºC')
+
+#ggplot(vegLengths, aes(length, fill = veg)) + 
+   #geom_histogram(alpha = 0.5, aes(y = ..density..), position = 'identity')
+
+```
+
+### inner distance
+```{r inner distance hist}
+ggplot(dist.inner, aes(distance, fill = temperature)) +
+  geom_histogram(bins = 100, alpha = 0.5, position = 'identity') +
+  labs(x = 'metabolic distance', title = 'metabolic distance within each temperature')
+```
+
+
+### Metabolites
+```{r metabolite hist}
+for (metabol in metabolites)
+{
+  pdf(paste('Results/Metabolome/Plots/', metabol, 'histogram.pdf', sep = '_'))
+   g <- ggplot(metabol.acn, aes_string(metabol, fill = "temperature")) +
+    geom_histogram(bins = 100, alpha = 0.5, position = 'identity')
+   print(g)
+  dev.off()
+}
+```
+
+
+## Heritabilities
+```{r H of metabolites}
+h <- metabol.sample %>%
+  select(-experiment) %>%
+  gather(key = 'metabolite', value = 'measurement', -sample, -accession, -temperature) %>%
+  split(f = list(.$metabolite, .$temperature), sep = '_') %>%
+  map(~H(as.data.frame(.[, c('accession', 'measurement')]), print = F)[4])
+
+h <- h %>%
+  as_tibble() %>%
+  gather(key = 'metabol.temp', value = 'heritability') %>%
+  separate(data = ., col = metabol.temp, into = c('metabolite', 'temperature'), sep = "_")
+
+h %>%
+  spread(key = temperature, value = heritability)
+```
+
+
+
+
+```{r write gwas data file(s)}
+gwas.metabol <- metabol.acn %>%
+  gather(key = 'metabolite', value = 'measurement', -accession, -temperature) %>%
+  unite(col = 'metabol_temp', metabolite, temperature, sep = '_') %>%
+  spread(key = metabol_temp, value = measurement)
+write_csv(gwas.metabol,'Data/Metabolites/GWAS/metabolites.csv')
+
+gwas.inner <- dist.inner %>%
+  spread(key = temperature, value = distance) %>%
+  rename(distance_16C = `16C`, distance_6C = `6C`)
+write.csv(gwas.inner,'Data/Metabolites/GWAS/innerMetabolicDistance.csv')
+
+write_csv(dist.metabol, 'Data/Metabolites/GWAS/metabolicDistance_16Cvs6C.csv')
+```
+
+
