@@ -18,7 +18,7 @@ library(nlme)
 # estimated marginal means fron mixed nmodel
 lemna <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Growth/rawdata_combined_annotation_NO.txt', header = T, sep = '\t')
 # load the mixed model
-load("/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/poly3_logRosette_NO_allReps_V3_corCAR1_correct.rda")
+#load("/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/poly3_logRosette_NO_allReps_V3_corCAR1_correct.rda")
 # randomisation Files
 randomFiles <- list.files('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Setup/GrowthChamber/', pattern = 'chamberRandomisation_.*_rep', full.names = T)
 randomisations <- lapply(randomFiles, FUN = read.table, header = T, stringsAsFactors = F)
