@@ -19,6 +19,11 @@ library(viridis)
 growth <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/lemna_DAS_allReps_NO_logRosette_emmeans_V3_CorCAR1_correct.txt', header = T)
 lemna <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Growth/rawdata_combined_annotation_NO.txt', header = T, sep = '\t')
 autumnTemp <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/QandD2/Results/Growth/meanAutumnTemperatureCLusters.txt', head = T)
+# models
+baseModel <- get(load("/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/poly3_logRosette_NO_allReps_V3_corCAR1_correct.rda"))
+expFixed <- get(load("/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/poly3_logRosette_NO_allReps_V3_corCAR1_expFixed.rda"))
+
+
 ```
 ```{r remove accessions}
 # 8343 shows a bad model fit to the data
@@ -61,7 +66,7 @@ visTemp <- data.frame('temperature' = temperatures, 'tempCol' = tempCol, 'tempLt
 # temperatureRange
 tempRange <- seq(-10, 20, by = 1)
 
-# get plasma colours fro temperature on continuous scale
+# get plasma colours for temperature on continuous scale
 autumnTemp$autumnTempInterval <- findInterval(autumnTemp$meanAutumn, tempRange)
 autumnTempColours.cte <- plasma(length(tempRange))
 autumnTemp$autumnTempCol <- autumnTempColours.cte[autumnTemp$autumnTempInterval]
@@ -71,10 +76,6 @@ growth$autumnTempCol <- autumnTemp$autumnTempCol[match(growth$autumnTemp, autumn
 # provide legend info for autumn temperature colours on continuous scale
 autumnTemp.legend <- data.frame('autumnTemp' = tempRange, 'autumnTempCol' = NA)
 autumnTemp.legend$autumnTempCol <- autumnTempColours.cte[c(1:length(tempRange))]
-
-#TEST#
-plot(autumnTemp$meanAutumn, autumnTemp$latitude, col = autumnTemp$autumnTempCol)
-gradientLegend(valRange = autumnTemp.legend$autumnTemp, color = autumnTemp.legend$autumnTempCol, pos = 0.225, side = 3, inside = T, pos.num = 1)
 ```
 
 
@@ -129,6 +130,15 @@ for (a in accessions)
 Visually, the model is fitting the data very well.
 Only accession 8343 is showing a very weird growth distinction between 6ºC and 16ºC.
 Check also of there are other accesisons to remove (e.g. 5865 05 5856)?
+
+### compare models
+```{r model comparison}
+AIC(baseModel, expFixed)
+anova(baseModel, expFixed)
+```
+Based on both AIC and F-test, the model with experiment added as fixed term is slightly better. This also makes biological sense.
+However, be cautious about the statistics here.
+
 
 
 
