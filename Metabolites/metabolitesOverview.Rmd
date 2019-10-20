@@ -25,6 +25,7 @@ dist.metabol <- read_csv('Data/Metabolites/metabolic_distance.csv')
 dist.inner <- read_csv('Data/Metabolites/innerdistance.csv')
 metabol.acn <- read_csv('Data/Metabolites/metabolites_accessions.csv')
 metabol.sample <- read_csv('Data/Metabolites/metabolites.csv')
+autumnTemp <- read_delim('../QandD2/Results/Growth/meanAutumnTemperatureCLusters.txt', '\t')
 ```
 
 ```{r datacleansing, include = F}
@@ -38,6 +39,7 @@ metabol.sample <- select(metabol.sample, -(X1), temperature = condition) %>% sel
 metabolites <- names(select(metabol.acn, -(c(accession, temperature))))
 temperatures <- c('16C', '6C')
 ```
+=
 
 
 ## Distributions
@@ -91,8 +93,6 @@ h %>%
 ```
 
 
-
-
 ```{r write gwas data file(s)}
 gwas.metabol <- metabol.acn %>%
   gather(key = 'metabolite', value = 'measurement', -accession, -temperature) %>%
@@ -103,9 +103,44 @@ write_csv(gwas.metabol,'Data/Metabolites/GWAS/metabolites.csv')
 gwas.inner <- dist.inner %>%
   spread(key = temperature, value = distance) %>%
   rename(distance_16C = `16C`, distance_6C = `6C`)
-write.csv(gwas.inner,'Data/Metabolites/GWAS/innerMetabolicDistance.csv')
+write_csv(gwas.inner,'Data/Metabolites/GWAS/innerMetabolicDistance.csv')
 
 write_csv(dist.metabol, 'Data/Metabolites/GWAS/metabolicDistance_16Cvs6C.csv')
+```
+## correlation mean autumn temperature
+```{r}
+#ToDo: recode to tidyverse
+autumnTemp <- as.data.frame(autumnTemp)
+autumnTemp$meanAutumn <- autumnTemp$meanAutumn
+dist.metabol <- as.data.frame(dist.metabol)
+
+dist.metabol$autumnTemp <- autumnTemp$meanAutumn[match(dist.metabol$accession, autumnTemp$acn)]
+
+# Visuals
+# temperatureRange
+tempRange <- seq(-10, 20, by = 1)
+
+# get plasma colours for temperature on continuous scale
+autumnTemp$autumnTempInterval <- findInterval(autumnTemp$meanAutumn, tempRange)
+autumnTempColours.cte <- plasma(length(tempRange))
+autumnTemp$autumnTempCol <- autumnTempColours.cte[autumnTemp$autumnTempInterval]
+
+# legend
+autumnTemp.legend <- data.frame('autumnTemp' = tempRange, 'autumnTempCol' = NA)
+autumnTemp.legend$autumnTempCol <- autumnTempColours.cte[c(1:length(tempRange))]
+
+# colours
+dist.metabol$autumnTempCol <- autumnTemp$autumnTempCol[match(dist.metabol$accession, autumnTemp$acn)]
+
+pdf('Results/Metabolome/Plots/metabolicDistance_vs_autumnTemperature.pdf', useDingbats = FALSE)
+plot(dist.metabol$autumnTemp, dist.metabol$distance, col = dist.metabol$autumnTempCol, xlab = expression(paste('autumn temperature (',degree~C,')')), pch = 19, ylab = expression(paste('metabolic distance (16',degree~C,'vs. 6',degree~C,')')), cex.axis = 1.3, cex.lab = 1.3, xlim = c(-6, 20), xaxs = 'i')
+     
+abline(lm(dist.metabol$distance ~ dist.metabol$autumnTemp))
+ct <- cor.test(dist.metabol$autumnTemp, dist.metabol$distance)
+text(x = par('usr')[1], y = par('usr')[4], paste('p: ', format.pval(ct$p.value, digits = 3, eps = 0.0001, nsmall = 4), sep = '' ), adj = c(-0.25 ,1.25))
+text(x = par('usr')[1], y = par('usr')[4], paste('r: ', round(ct$estimate, 4), sep = '' ), adj = c(-0.275 ,2.75))
+gradientLegend(valRange = autumnTemp.legend$autumnTemp, color = autumnTemp.legend$autumnTempCol, pos = 0.5 - (2.25/30), length = 30/26, side = 1, inside = T, pos.num = 3, n.seg = 1, coords = F, depth = 0.01)
+dev.off()
 ```
 
 
