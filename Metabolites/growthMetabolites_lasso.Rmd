@@ -1,0 +1,264 @@
+---
+title: "lasso regression"
+output: html_document
+author: 'Pieter Clauw'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(tidyverse)
+library(glmnet)
+library(glinternet)
+
+setwd('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/')
+```
+
+
+```{r data}
+growth <- read_csv('Data/Growth/GWAS/growthPheno.csv')
+metabolites <- read_csv('Data/Metabolites/GWAS/metabolites.csv')
+```
+```{r prepare data}
+# combine datasets
+growthMetabol.wide <- inner_join(growth, metabolites, by = 'accession')
+
+# make long for temperature
+growthMetabol <- growthMetabol.wide %>%
+  pivot_longer(
+    cols = ends_with('C'),
+    names_to = c(".value", "temperature"),
+    names_sep = '_')
+```
+
+```{r general variables}
+temperatures <- c('16C', '6C')
+```
+
+
+## Temperature Specific
+
+```{r temperature specific Lasso}
+lasso_LGR <- data.frame(name = character(), temperature = character(), coefficient = numeric())
+for (temp in temperatures)
+{
+  x <- growthMetabol %>%
+    filter(temperature == temp) %>%
+    select(LGR:Valine)%>%
+    model.matrix(LGR ~ ., data = .)
+  x <- x[,-1]
+
+  y <- growthMetabol %>%
+  filter(temperature == temp) %>%
+  select(LGR) %>%
+  .$LGR
+
+  # find optimal lambda
+  cv.out <- cv.glmnet(x,y, alpha = 1)
+  plot(cv.out)  
+  lambda.min <- cv.out$lambda.min
+  # save significant coefficients
+  coef.temp <- coef(cv.out, s = lambda.min)
+  lasso_LGR <- lasso_LGR %>%
+    bind_rows(data.frame(name = coef.temp@Dimnames[[1]][coef.temp@i + 1], temperature = temp, coefficient = coef.temp@x))
+}
+```
+
+## Temperature response
+```{r LGR response lasso}
+x <- growthMetabol.wide %>%
+  select(LGR_response:Valine_6C, -autumnTemp)%>%
+  model.matrix(LGR_response ~ ., data = .)
+x <- x[,-1]
+
+y <- growthMetabol.wide %>%
+  select(LGR_response) %>%
+  .$LGR_response
+
+# find optimal lambda
+cv.out <- cv.glmnet(x,y, alpha = 1)
+plot(cv.out)  
+lambda.min <- cv.out$lambda.min
+
+# save significant coefficients
+coef.temp <- coef(cv.out, s = lambda.min)
+lasso_LGR <- lasso_LGR %>%
+  bind_rows(data.frame(name = coef.temp@Dimnames[[1]][coef.temp@i + 1], temperature = 'response', coefficient = coef.temp@x))
+
+```
+
+
+## Combined temperatures
+Using glinternet here.
+This pacakges allows to run lasso on models with interaction terms.
+It only allows for interaction terms if also the main effect terms have non-zero coefficients.
+```{r LGR combined temperatures lasso}
+# select explanatory variables
+# categorical variabels transformed to integers starting from 0
+LGRmetabol <- growthMetabol %>%
+  select(temperature, Alanine:Valine)
+
+y <- growthMetabol %>%
+  select(LGR) %>%
+  .$LGR
+
+# define numeric variables
+numVar <- sapply(LGRmetabol, is.numeric)
+
+# set number of levels for each variable (1 for continuous variables)
+numLevels <- LGRmetabol %>%
+  mutate_if(!(numVar), as.factor) %>%
+  sapply(nlevels)
+numLevels[numLevels == 0] <- 1
+
+# specify x matrix
+x <- LGRmetabol %>%
+  mutate_if(!(numVar), as.factor) %>%
+  mutate_if(is.factor, as.integer) %>%
+  mutate_if(!(numVar), function(x)(x -1))
+
+
+# specify pairwise interactions
+tempIdx <- which(colnames(x) == 'temperature')
+interactionPairs <- matrix(c(rep(tempIdx, ncol(x) - tempIdx), c((tempIdx + 1):ncol(x))), ncol = 2)
+  
+
+# find optimal lambda
+#TODO: try extremley high nLambda
+# does this make sense?
+set.seed(19)
+cv_fit <- glinternet.cv(x, y, numLevels, interactionPairs = interactionPairs, nFolds = 100, nLambda = 10000)
+#cv_fit <- glinternet.cv(x, y, numLevels, nFolds = 10, nLambda = 10000)
+plot(cv_fit)
+lambda.1se.idx <- which(cv_fit$lambda == cv_fit$lambdaHat1Std)
+
+# coefficents
+coefs <- coef(cv_fit$glinternetFit)[[lambda.1se.idx]]
+idx_cat <- (1:length(numVar))[!numVar]
+names(numLevels)[idx_cat[coefs$mainEffects$cat]]
+idx_num <- (1:length(numVar))[numVar]
+names(numLevels)[idx_num[coefs$mainEffects$cont]]
+```
+
+
+
+
+
+## LEARNED
+use glmnet -> best package for lasso regression it seems
+glmnet does both ridge (alpha = 0) and lasso regression )alpha = 1), and everything inbetweeen.
+ optimal lambda is lambda.1se (low number of coefficients, but still wit good accuracy, only lowest number of coefficients is reached with lambda.min)
+ 
+ 
+
+
+
+
+
+## TUTORIAL
+### glmnet
+```{r glmnet}
+swiss <- datasets::swiss
+x <- model.matrix(Fertility~., swiss)[, -1]
+y <- swiss$Fertility
+lambda <- 10^seq(10, -2, length = 100)
+
+# create test and training set
+set.seed(489)
+train <- sample(1:nrow(x), nrow(x)/2)
+test <- (-train)
+
+ytest <- y[test]
+
+# OLS
+swisslm <- lm(Fertility ~ ., data = swiss)
+coef(swisslm)
+anova(swisslm)
+
+# ridge
+ridge.mod <- glmnet(x, y, alpha = 0, lambda = lambda)
+predict(ridge.mod, x = x, y = y, s = 0, exact = T, type = 'coefficients')[1:6, ]
+
+# inprove ridge
+swisslm <- lm(Fertility ~ ., data = swiss, subset = train)
+ridge.mod <- glmnet(x[train, ], y[train], alpha = 0, lambda = lambda)
+
+# find best lambda
+cv.out <- cv.glmnet(x[train, ], y[train], alpha = 0)
+bestlam <- cv.out$lambda.min
+
+# make predictions
+ridge.pred <- predict(ridge.mod, s = bestlam, newx = x[test,])
+s.pred <- predict(swisslm, newdata = swiss[test,])
+
+# check MSE
+mean((s.pred-ytest)^2)
+
+mean((ridge.pred-ytest)^2)
+
+# coefficients
+out <- glmnet(x[train, ], y[train], alpha = 0)
+predict(ridge.mod, type = 'coefficients', s = bestlam)[1:6,]
+
+# lasso
+lasso.mod <- glmnet(x[train, ], y[train], alpha =1, lambda = lambda)
+lasso.pred <- predict(lasso.mod, s = bestlam, newx = x[test,])
+mean((lasso.pred-ytest)^2)
+lasso.coef <- predict(lasso.mod, type = 'coefficients', s = bestlam)[1:6,]
+lasso.coef
+plot(cv.out)
+
+```
+
+### glinternet
+```{r glinternet}
+# Model2 contains model names, which aren't useful here
+df <- rpart::car90 %>% select(-Model2)
+
+# drop rows with empty outcomes
+df <- df[!is.na(df$Price), ]
+y <- df$Price
+df <- df %>% select(-Price)
+
+# impute the median for the continuous variables
+i_num <- sapply(df, is.numeric)
+df[, i_num] <- apply(df[, i_num], 2, function(x) ifelse(is.na(x), median(x, na.rm=T), x))
+
+# impute empty categories
+df[, !i_num] <- apply(df[, !i_num], 2, function(x) {
+  x[x==""] <- "empty"
+  x[is.na(x)] <- "missing"
+  x
+})
+
+# get the numLevels vector containing the number of categories
+X <- df
+X[, !i_num] <- apply(X[, !i_num], 2, factor) %>% as.data.frame()
+numLevels <- X %>% sapply(nlevels)
+numLevels[numLevels==0] <- 1
+
+# make the categorical variables take integer values starting from 0
+X[, !i_num] <- apply(X[, !i_num], 2, function(col) as.integer(as.factor(col)) - 1)
+
+# glinternet
+## pick lambda
+set.seed(1001)
+cv_fit <- glinternet.cv(X, y, numLevels)
+plot(cv_fit)
+i_1Std <- which(cv_fit$lambdaHat1Std == cv_fit$lambda)
+
+coefs <- coef(cv_fit$glinternetFit)[[i_1Std]]
+
+## Main effects
+### numerical variables
+idx_num <- (1:length(i_num))[i_num]
+names(numLevels)[idx_num[coefs$mainEffects$cont]]
+### categorical variables
+idx_cat <- (1:length(i_num))[!i_num]
+names(numLevels)[idx_cat[coefs$mainEffects$cat]]
+
+## Interaction pairs
+coefs$interactions
+```
+
+
