@@ -10,8 +10,8 @@ options(stringsAsFactors = F)
 library(tidyverse)
 library(glmnet)
 library(glinternet)
-
-setwd('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/')
+knitr::opts_knit$set(root.dir = '/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/')
+#setwd('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/')
 ```
 
 
@@ -127,7 +127,7 @@ interactionPairs <- matrix(c(rep(tempIdx, ncol(x) - tempIdx), c((tempIdx + 1):nc
 #TODO: try extremley high nLambda
 # does this make sense?
 set.seed(19)
-cv_fit <- glinternet.cv(x, y, numLevels, interactionPairs = interactionPairs, nFolds = 100, nLambda = 10000)
+cv_fit <- glinternet.cv(x, y, numLevels, interactionPairs = interactionPairs, nLambda = 500000, numCores = 8)
 #cv_fit <- glinternet.cv(x, y, numLevels, nFolds = 10, nLambda = 10000)
 plot(cv_fit)
 lambda.1se.idx <- which(cv_fit$lambda == cv_fit$lambdaHat1Std)
