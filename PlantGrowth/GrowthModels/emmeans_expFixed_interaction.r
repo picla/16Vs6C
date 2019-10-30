@@ -29,15 +29,21 @@ lemna <- lemna %>%
 
 ## create prediction data
 predictionData <- data.frame(
-  'acn' = rep(accessions, each = length(DASs)*length(experiments)),
+  'acn' = as.factor(rep(accessions, each = length(DASs)*length(experiments))),
   'DAS' = rep(rep(DASs, each = length(experiments)), length(accessions)),
-  'experiment' = rep(experiments, length(accessions)*length(DASs)))
+  'experiment' = as.factor(rep(experiments, length(accessions)*length(DASs))))
+
+# Estimated Marginal Means
+emm <- emmeans(lme.fit, ~ DAS * acn * experiment, cov.reduce = F, data = predictionData) %>%
+  summary() %>%
+  write_csv(path = 'Results/Growth/poly3_logRosette_NO_allReps_V3_corCAR1_expFixed_interaction_emmeans.csv')
 
 
 
 
 
 
+  
 
 
 
