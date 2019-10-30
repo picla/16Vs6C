@@ -55,14 +55,14 @@ pdf('Results/Growth/Plots/poly3_logRosette_NO_allReps_resiudals_V3_corCAR1_corre
 plot(lemnaSlim.poly)
 dev.off()
 
-#lsmeans
+#emmeans
 # set timepoints to get estimates
 time0 <- min(unique(lemna$DAS))
 timeX <- max(unique(lemna$DAS))
 timepoints <- seq(time0, timeX, length.out = 21)
 
 
-# lsmeans - model with temperature as fixed effect
+# emmeans - model with temperature as fixed effect
 acns <- unique(lemna$acn)
 acnTime <- c()
 for (a in acns)
