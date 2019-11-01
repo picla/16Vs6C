@@ -1,0 +1,71 @@
+---
+title: "environment"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(tidyverse)
+library(glmnet)
+library(glinternet)
+knitr::opts_knit$set(root.dir = '/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/')
+```
+
+## Environmental correlations with growth
+
+
+```{r Data}
+# growth data
+growth <- read_csv('Data/Growth/GWAS/growthPheno.csv')
+# worldclim data
+clim <- read_delim('/Volumes/nordborg/user/pieter.clauw/Documents/Source/Accessions/List_2029_latlon_env.txt', delim = '\t')
+```
+
+```{r tidying}
+clim %>%
+  mutate(autumnTemp = rowMeans(select(., tmean_10, tmean_11, tmean_12)))
+
+growth.long <- growth %>%
+  pivot_longer(
+    cols = ends_with('C'),
+    names_to = c(".value", "temperature"),
+    names_sep = '_')
+
+growthClim <- inner_join(growth.long, clim, by = c('accession' = 'tg_ecotypeid')) %>%
+  select(accession, rosette35DAS, LGR, LGR_response, temperature, everything()) %>%
+  subset(!is.na(alt))
+```
+
+
+
+```{r lasso regression}
+# do this for each temperature and for each phenotype (LGR and rosette area)
+for (pheno in c('LGR', 'rosette35DAS'))
+for (temp in unique(growthClim$temperature))
+{
+  x <- growthClim %>%
+    filter(temperature == temp) %>%
+    select(rosette35DAS, autumnTemp:tmin_9) %>%
+    model.matrix(rosette35DAS ~ ., data = .)
+  x <- x[,-1]
+
+  y <- growthClim %>%
+    filter(temperature == temp) %>%
+    select(rosette35DAS) %>%
+    .$rosette35DAS
+
+  # find optimal lambda
+  cv.out <- cv.glmnet(x,y, alpha = 1)
+  plot(cv.out)  
+  lambda.min <- cv.out$lambda.min
+  # save significant coefficients
+  coef.temp <- coef(cv.out, s = lambda.min)
+  lasso_LGR <- lasso_LGR %>%
+    bind_rows(data.frame(name = coef.temp@Dimnames[[1]][coef.temp@i + 1], temperature = temp, coefficient = coef.temp@x))  
+}
+
+
+```
+
+
