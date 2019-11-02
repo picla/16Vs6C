@@ -21,6 +21,10 @@ growth <- read_csv('Data/Growth/GWAS/growthPheno.csv')
 # worldclim data
 clim <- read_delim('/Volumes/nordborg/user/pieter.clauw/Documents/Source/Accessions/List_2029_latlon_env.txt', delim = '\t')
 ```
+```{r general variables}
+temperatures <- c('16C', '6C')
+phenotypes <- c('LGR', 'rosette35DAS')
+```
 
 ```{r tidying}
 clim %>%
@@ -28,44 +32,111 @@ clim %>%
 
 growth.long <- growth %>%
   pivot_longer(
-    cols = ends_with('C'),
+    cols = contains('_'),
     names_to = c(".value", "temperature"),
     names_sep = '_')
 
 growthClim <- inner_join(growth.long, clim, by = c('accession' = 'tg_ecotypeid')) %>%
-  select(accession, rosette35DAS, LGR, LGR_response, temperature, everything()) %>%
+  select(accession, rosette35DAS, LGR, temperature, everything()) %>%
   subset(!is.na(alt))
 ```
 
 
 
-```{r lasso regression}
+```{r per temperature}
 # do this for each temperature and for each phenotype (LGR and rosette area)
-for (pheno in c('LGR', 'rosette35DAS'))
-for (temp in unique(growthClim$temperature))
+lasso.clim <- data.frame(phenotype = character(), temperature = character(), name = character(), coefficient = numeric())
+for (pheno in phenotypes)
 {
-  x <- growthClim %>%
-    filter(temperature == temp) %>%
-    select(rosette35DAS, autumnTemp:tmin_9) %>%
-    model.matrix(rosette35DAS ~ ., data = .)
-  x <- x[,-1]
+  for (temp in c(temperatures, 'response'))
+  {
+    if (temp == 'response' & pheno == 'rosette35DAS'){next()}
+    
+    x <- growthClim %>%
+      filter(temperature == temp) %>%
+      select(pheno, autumnTemp:tmin_9) %>%
+      model.matrix(formula(.[[pheno]] ~ .), data = .)
+    x <- x[,-c(1,2)]
+    
+growthClim %>%
+  filter(temperature == temp) %>%
+  select(LGR, autumnTemp:tmin_9) %>%
+  model.matrix(LGR ~ ., data = .)
+  
+     y <- growthClim %>%
+      filter(temperature == temp) %>%
+      select(pheno) %>%
+      .[[pheno]]
 
-  y <- growthClim %>%
-    filter(temperature == temp) %>%
-    select(rosette35DAS) %>%
-    .$rosette35DAS
-
-  # find optimal lambda
-  cv.out <- cv.glmnet(x,y, alpha = 1)
-  plot(cv.out)  
-  lambda.min <- cv.out$lambda.min
-  # save significant coefficients
-  coef.temp <- coef(cv.out, s = lambda.min)
-  lasso_LGR <- lasso_LGR %>%
-    bind_rows(data.frame(name = coef.temp@Dimnames[[1]][coef.temp@i + 1], temperature = temp, coefficient = coef.temp@x))  
+    # find optimal lambda
+    cv.out <- cv.glmnet(x,y, alpha = 1)
+    plot(cv.out)  
+    lambda.min <- cv.out$lambda.min
+    # save significant coefficients
+    coef.temp <- coef(cv.out, s = lambda.min)
+    lasso.clim <- lasso.clim %>%
+      bind_rows(data.frame(phenotype = pheno, temperature = temp, name = coef.temp@Dimnames[[1]][coef.temp@i + 1], coefficient = coef.temp@x))  
+  }
 }
-
-
 ```
 
+
+```{r glinternet}
+for (pheno in phenotypes)
+{
+  for (temp in c(temperatures, 'response'))
+  {
+    if (temp == 'response' & pheno == 'rosette35DAS'){next()}
+    y <- growthClim %>%
+      filter(temperature == temp) %>%
+      select(pheno) %>%
+      .[[pheno]]
+
+    # define numeric variables
+    numVar <- growthClim %>%
+      filter(temperature == temp) %>%
+      select(autumnTemp:tmin_9) %>%
+      sapply(., is.numeric)
+
+    # set number of levels for each variable (1 for continuous variables)
+    numLevels <- growthClim %>%
+      filter(temperature == temp) %>%
+      select(autumnTemp:tmin_9) %>%
+      mutate_if(!(numVar), as.factor) %>%
+      sapply(nlevels)
+    numLevels[numLevels == 0] <- 1
+
+    # specify x matrix
+    x <- growthClim %>%
+      filter(temperature == temp) %>%
+      select(autumnTemp:tmin_9)
+      mutate_if(!(numVar), as.factor) %>%
+      mutate_if(is.factor, as.integer) %>%
+      mutate_if(!(numVar), function(x)(x -1))
+
+
+    # specify pairwise interactions
+    tempIdx <- which(colnames(x) == 'temperature')
+    interactionPairs <- matrix(c(rep(tempIdx, ncol(x) - tempIdx), c((tempIdx + 1):ncol(x))), ncol = 2)
+  
+
+    # find optimal lambda
+    set.seed(19)
+    cv_fit <- glinternet.cv(x, y, numLevels, nLambda = 100, numCores = 8)
+    #cv_fit <- glinternet.cv(x, y, numLevels, nFolds = 10, nLambda = 10000)
+    plot(cv_fit)
+    lambda.min.idx <- which(cv_fit$lambda == cv_fit$lambdaHat)
+
+    # coefficents
+    ## main
+    coefs <- coef(cv_fit$glinternetFit)[[lambda.min.idx]]
+    idx_cat <- (1:length(numVar))[!numVar]
+    names(numLevels)[idx_cat[coefs$mainEffects$cat]]
+    idx_num <- (1:length(numVar))[numVar]
+    names(numLevels)[idx_num[coefs$mainEffects$cont]]
+    ## interactions
+    
+}
+}
+```
 
