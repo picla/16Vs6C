@@ -153,8 +153,6 @@ glmnet does both ridge (alpha = 0) and lasso regression )alpha = 1), and everyth
 
 
 
-
-
 ## TUTORIAL
 ### glmnet
 ```{r glmnet}
