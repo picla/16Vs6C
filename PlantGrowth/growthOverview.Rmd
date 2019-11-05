@@ -11,6 +11,10 @@ options(stringsAsFactors = F)
 source('Rfunctions.R')
 library(nlme)
 library(viridis)
+library(itsadug)
+library(tidyverse)
+library(wesanderson)
+knitr::opts_knit$set(root.dir = "/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/")
 ```
 
 
@@ -192,7 +196,7 @@ dev.off()
 ```{r LGR 14-35DAS}
 getSlope.14.35 <- function(acn, temp)
 {
-  getSlope(acn, temp, DAS1 = 14, DAS2 = 35, emm = growth)
+  getSlope.acn(acn, temp, DAS1 = 14, DAS2 = 35, emm = growth)
 }
 ```
 
@@ -203,6 +207,20 @@ LGR$autumnTempCol <- growth$autumnTempCol[match(LGR$acn, growth$acn)]
 LGR$autmnTemp <- autumnTemp$meanAutumn[match(LGR$acn, autumnTemp$acn)]
 ```
 
+```{r LGR histogram}
+LGR.tbl <- as_tibble(LGR) %>%
+  rename(temperature = temp)
+pdf('Results/Growth/Plots/linearGrowth_14_35DAS_histogram.pdf')
+   g <- ggplot(LGR.tbl, aes_string('slope', color = "temperature", fill = "temperature")) +
+    geom_histogram(bins = 100, alpha = 0.5, position = 'identity') +
+     labs(x = 'linear growth rate (14-35DAS)') +
+     scale_color_manual(values=wes_palette(n=2, name="Darjeeling1")) +
+     theme_classic(base_size = 16) +
+     theme(legend.position = c(0.8, 0.9))
+   print(g)
+  dev.off()
+
+```
 
 
 ## Response curves
