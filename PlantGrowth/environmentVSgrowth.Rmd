@@ -9,6 +9,8 @@ options(stringsAsFactors = F)
 library(tidyverse)
 library(glmnet)
 library(glinternet)
+library(caret)
+library(leaps)
 knitr::opts_knit$set(root.dir = '/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/')
 ```
 
@@ -19,7 +21,8 @@ knitr::opts_knit$set(root.dir = '/Volumes/nordborg/user/pieter.clauw/Documents/E
 # growth data
 growth <- read_csv('Data/Growth/GWAS/growthPheno.csv')
 # worldclim data
-clim <- read_delim('/Volumes/nordborg/user/pieter.clauw/Documents/Source/Accessions/List_2029_latlon_env.txt', delim = '\t')
+worldclim <- read_delim('/Volumes/nordborg/user/pieter.clauw/Documents/Source/Accessions/List_2029_latlon_env.txt', delim = '\t')
+clim <- read_csv('/Volumes/nordborg/user/pieter.clauw/Documents/Source/Accessions/araclim.csv')
 ```
 ```{r general variables}
 temperatures <- c('16C', '6C')
@@ -27,18 +30,18 @@ phenotypes <- c('LGR', 'rosette35DAS')
 ```
 
 ```{r tidying}
-clim %>%
-  mutate(autumnTemp = rowMeans(select(., tmean_10, tmean_11, tmean_12)))
+#clim %>%
+#  mutate(autumnTemp = rowMeans(select(., tmean_10, tmean_11, tmean_12)))
 
 growth.long <- growth %>%
+  select(everything(), -autumnTemp) %>%
   pivot_longer(
     cols = contains('_'),
     names_to = c(".value", "temperature"),
     names_sep = '_')
 
-growthClim <- inner_join(growth.long, clim, by = c('accession' = 'tg_ecotypeid')) %>%
-  select(accession, rosette35DAS, LGR, temperature, everything()) %>%
-  subset(!is.na(alt))
+growthClim <- inner_join(growth.long, clim, by = c('accession' = 'id')) %>%
+  select(accession, rosette35DAS, LGR, temperature, everything())
 ```
 
 
@@ -48,20 +51,22 @@ growthClim <- inner_join(growth.long, clim, by = c('accession' = 'tg_ecotypeid')
 lasso.clim <- data.frame(phenotype = character(), temperature = character(), name = character(), coefficient = numeric())
 for (pheno in phenotypes)
 {
+  nonPheno <- phenotypes[phenotypes != pheno]
   for (temp in c(temperatures, 'response'))
   {
     if (temp == 'response' & pheno == 'rosette35DAS'){next()}
     
     x <- growthClim %>%
       filter(temperature == temp) %>%
-      select(pheno, autumnTemp:tmin_9) %>%
+      select(pheno, everything(), -accession, -nonPheno, -temperature, -lng, -lat, -name, -country, -CS_number, -group) %>%
+      select_if(~ !any(is.na(.))) %>%
       model.matrix(formula(.[[pheno]] ~ .), data = .)
     x <- x[,-c(1,2)]
     
-growthClim %>%
-  filter(temperature == temp) %>%
-  select(LGR, autumnTemp:tmin_9) %>%
-  model.matrix(LGR ~ ., data = .)
+#growthClim %>%
+#  filter(temperature == temp) %>%
+#  select(LGR, autumnTemp:tmin_9) %>%
+#  model.matrix(LGR ~ ., data = .)
   
      y <- growthClim %>%
       filter(temperature == temp) %>%
@@ -79,6 +84,48 @@ growthClim %>%
   }
 }
 ```
+
+```{r find NA accessions}
+naclim <- growthClim %>%
+  filter(temperature == temp) %>%
+  select(accession, contains('WC'))
+```
+
+
+```{r stepwise regression}
+for (pheno in phenotypes)
+{
+  nonPheno <- phenotypes[phenotypes != pheno]
+  for (temp in c(temperatures, 'response'))
+  {
+# Set seed for reproducibility
+set.seed(123)
+
+      x <- growthClim %>%
+        filter(temperature == temp) %>%
+        select(pheno, everything(), -accession, -nonPheno, -temperature, -lng, -lat, -name, -country, -CS_number, -group)
+      
+      
+      %>%
+        select_if(~ !any(is.na(.)))
+    
+    # Set up repeated k-fold cross-validation
+    train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+    step.model <- train(LGR ~., data = growthClim_WC,
+                    method = "leapSeq", 
+                    tuneGrid = data.frame(nvmax = 1:20),
+                    trControl = train.control
+                    )
+step.model$results
+step.model$bestTune
+summary(step.model$finalModel)
+  }
+}
+```
+
+
+
 
 
 ```{r glinternet}
