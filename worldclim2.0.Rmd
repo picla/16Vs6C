@@ -1,0 +1,100 @@
+---
+title: "WorldClim"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(tidyverse)
+library(raster)
+```
+
+Get the worldclim2.0 data at high spatial resolution (30s) for all accessions.
+
+
+```{r Data}
+clim1 <- read_tsv('/Volumes/nordborg/user/pieter.clauw/Documents/Source/Accessions/List_2029_latlon_env.txt')
+araclim <- read_csv('/Volumes/nordborg/user/pieter.clauw/Documents/Source/Accessions/araclim.csv')
+
+# accesisons
+acns.modif <- read_csv('/Volumes/nordborg/user/pieter.clauw/Documents/Source/Accessions/accs_2029_ids_lat_long.modified_MN_SH.csv')
+
+# default coordinate system
+crs.wc <- '+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0'
+
+clim.dir <- '/Volumes/nordborg/user/pieter.clauw/Documents/Source/WorldClim/wc2.0_30s/'
+clim.vars <- c('bio', 'prec', 'srad', 'tavg', 'tmax', 'tmin', 'vapr', 'wind')
+```
+Wordlclim data uses the longlat WGS84 coordinate system (CRS).This is the global system also use by google maps and the same as the coordinates for the accessions.
+
+coordinates in List_2029_latlon_env are not matching the master list.
+e.g. the deviation for the coordinates of accession 6074 differ between land and sea with ±500m.
+
+```{r get data per accession}
+clim2 <- acns.modif %>%
+  dplyr::select(accession = tg_ecotypeid, longitude, latitude)
+
+for (cv in clim.vars)
+{
+  cv.files <- list.files(paste(clim.dir, cv, sep = ''), pattern = '*.tif', full.names = T)
+  for (cv.file in cv.files)
+  {
+    # load data and test CRS
+    cv.data <- raster(cv.file)
+    if (crs(cv.data, asText = T) != crs.wc){print('WARNING: CRS is not correct')}
+    
+    cv_nr <- strsplit(strsplit(cv.file, split = 'wc2.0_30s_')[[1]][2], split = '[.]')[[1]][1]
+    clim2[, cv_nr] <- extract(cv.data, clim2[, c('longitude', 'latitude')], method = 'bilinear')
+  }
+}
+```
+
+
+```{r test against clim1 and araclim}
+# clim1
+clim.vars.common <- colnames(clim2)[colnames(clim2) %in% colnames(clim1)]
+
+clim.join <- clim2 %>%
+  left_join(., clim1, by = c('accession' = 'tg_ecotypeid')) %>%
+  dplyr::select(matches(".*x$|.*y$"))
+
+test <- clim.join %>%
+  dplyr::select(contains('tmin_10'))
+
+plot(test$tmin_10.x, test$tmin_10.y)
+```
+
+Adding summaries per season.
+Winter is jan, feb, mar
+Spring is apr, may, jun
+Summer is jul, aug, sep
+Autumn is oct, nov, dec
+
+Seasona are annotated with month numbers
+  e.g. summer minimum temperature is tmin_07_08_09.
+```{r make seasonal}
+
+for (cv in clim.vars[-1])
+{
+  for (i in c(1,4,7,10))
+  {
+    months.nr <- sprintf("%02d", c(i:(i+2)))
+    months.cv <- paste(cv, months.nr, sep = '_')
+    season <- paste(cv, paste(months.nr, collapse = '_'), sep = '_')
+
+    clim2 <- mutate(clim2, !!season := rowMeans(dplyr::select(clim2, months.cv)))
+  }
+}
+```
+
+
+
+```{r write data}
+write_csv(clim2, '/Volumes/nordborg/user/pieter.clauw/Documents/Source/Accessions/2029_modified_MN_SH_wc2.0_30s_bilinear.csv')
+```
+
+
+
+
+
