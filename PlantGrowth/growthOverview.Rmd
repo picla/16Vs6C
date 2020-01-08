@@ -269,6 +269,8 @@ LGR.respCurve$autumnTemp <- autumnTemp$meanAutumn[match(LGR.respCurve$acn, autum
 LGR.respCurve$autumnTempCol <- growth$autumnTempCol[match(LGR.respCurve$acn, growth$acn)]
 ```
 
+
+
 ```{r LGR response slope vs autumn temperature}
 pdf(paste('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/Plots/linearGrowth_14_35DAS_responseslope_VS_autumnTemperature.pdf', sep = ''), useDingbats = FALSE)
 plot(LGR.respCurve$autumnTemp, LGR.respCurve$respCurve, col = LGR.respCurve$autumnTempCol, xlab = expression(paste('autumn temperature (',degree~C,')')), pch = 19, ylab = 'response slope', cex.axis = 1.3, cex.lab = 1.3, xlim = c(-6, 20))
@@ -301,11 +303,14 @@ for (t in temperatures)
   GWAS.Y[, paste('LGR', t, sep = '_')] <- LGR.t$slope[match(GWAS.Y$accession, LGR.t$acn)]
 }
 
+
+
+
 # LGR response slope
 GWAS.Y$LGR_response <- LGR.respCurve$respCurve[match(GWAS.Y$accession, LGR.respCurve$acn)]
 
-# mean autumn temperature
-GWAS.Y$autumnTemp <- autumnTemp$meanAutumn[match(GWAS.Y$accession, autumnTemp$acn)]
+# rosette area 35DAS percent reduction
+GWAS.Y$rosette35DAS_perRed <- ((GWAS.Y$rosette35DAS_6C - GWAS.Y$rosette35DAS_16C)/GWAS.Y$rosette35DAS_16C)*100
 
 # write data
 write.csv(GWAS.Y, file = '/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Growth/GWAS/growthPheno.csv', row.names = F, quote = F)
