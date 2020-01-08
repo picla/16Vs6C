@@ -100,8 +100,10 @@ getSlope.acn <- function(acn, temp, DAS1, DAS2, emm)
   return(fit$effects[2])
 }
 
-# get slope of linear growth betwene tow timepoints, per individual
-getSlope.ind <- function(ID, DAS1, DAS2, growth)
+
+# get slope of linear growth betwene two timepoints, per individual
+# OLD VERSION
+"getSlope.ind <- function(ID, DAS1, DAS2, growth)
 {
   growth.ind <- growth[growth$ID == ID & growth$DAS %in% c(DAS1, DAS2), ]
   if (any(is.na(growth.ind$logArea))){return(NA)}
@@ -109,8 +111,18 @@ getSlope.ind <- function(ID, DAS1, DAS2, growth)
   fit <- lm(logArea ~ DAS, data = growth.ind)
   return(fit$effects[2])
   }
-}
+}"
 
+# get slope of linear growth over multiple timepoints, per individual
+getSlope.ind <- function(ID, DASs, growth)
+{
+  growth.ind <- growth[growth$ID == ID & growth$DAS %in% DASs, ]
+  if (any(is.na(growth.ind$logArea))){return(NA)}
+  else{
+    fit <- lm(logArea ~ DAS, data = growth.ind)
+    return(fit$effects[2])
+  }
+}
 
 # get resonse curve of linear growth
 getRespCurve <- function(acn, growthSlopes)
@@ -139,12 +151,7 @@ predictData.PerExperiment <- function(experiment)
 }
 
 
-# plot a combined histogram
-plotComboHist <- function(DF)
-{
-  
-  
-}
+
   
   
 
