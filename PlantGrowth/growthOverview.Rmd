@@ -32,7 +32,6 @@ expFixed <- get(load("/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/
 ```{r remove accessions}
 # 8343 shows a bad model fit to the data
 growth <- growth[growth$acn != 8343, ]
-
 ```
 
 ```{r general variables}
