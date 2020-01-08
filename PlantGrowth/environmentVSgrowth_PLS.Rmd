@@ -1,0 +1,102 @@
+---
+title: "PLS"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(tidyverse)
+library(caret)
+library(olsrr)
+knitr::opts_knit$set(root.dir = '/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/')
+```
+```{r Data}
+# growth data
+growth <- read_csv('Data/Growth/GWAS/growthPheno.csv')
+# worldclim data
+worldclim <- read_csv('/Volumes/nordborg/user/pieter.clauw/Documents/Source/Accessions/2029_modified_MN_SH_wc2.0_30s_bilinear.csv')
+#clim <- read_csv('/Volumes/nordborg/user/pieter.clauw/Documents/Source/Accessions/araclim.csv')
+meta <- read_csv('/Volumes/nordborg/user/pieter.clauw/Documents/Source/Accessions/A.thaliana_master_accession_list_011215.csv')
+```
+```{r general variables}
+temperatures <- c('16C', '6C')
+phenotypes <- c('LGR', 'rosette35DAS')
+
+acns.SWE <- growth$accession[growth$accession %in% meta$id[meta$country == 'SWE']]
+```
+```{r tidying}
+#clim %>%
+#  mutate(autumnTemp = rowMeans(select(., tmean_10, tmean_11, tmean_12)))
+
+growth.long <- growth %>%
+  # remove accesisons 7471 from analysis. this accession lacks known coordinates
+  filter(growth$accession != 7471) %>%
+  select(everything(), rosette35DAS_response = rosette35DAS_perRed) %>%
+  pivot_longer(
+    cols = contains('_'),
+    names_to = c(".value", "temperature"),
+    names_sep = '_')
+
+growthClim <- inner_join(growth.long, worldclim, by = 'accession') %>%
+  select(accession, rosette35DAS, LGR, temperature, everything())
+```
+
+
+## multi-colinearity
+It is very likely that there will be multi-colinearity in the explanatory climate variables.
+Especially between the seasonal summaries and the corresponding months, but also between months and between different variables and the the bioclimatic summaries of those variables.
+
+First we will assess how big the problem is.
+Since we certainly expect colinearity between months and seasonal summaries, we will split up the analyses between monthly and seasonal data.
+
+```{r multicolinearity}
+
+```
+
+
+
+
+
+
+```{r PLS}
+for (pheno in phenotypes)
+{
+  nonPheno <- phenotypes[phenotypes != pheno]
+  for (temp in c(temperatures, 'response'))
+  {
+    
+    growthClim.temp.pheno <- growthClim %>%
+      filter(temperature == temp) %>%
+      select(-accession, -nonPheno, -temperature, -longitude, -latitude)
+      
+    # Compile cross-validation settings
+    set.seed(100)
+    myfolds <- createMultiFolds(as.vector(growthClim.temp.pheno[, pheno]), k = 5, times = 10)
+    control <- trainControl("repeatedcv", index = myfolds, selectionFunction = "oneSE")
+
+    # Train PLS model
+    mod1 <- train(as.formula(paste(pheno,'~ .')), data = growthClim.temp.pheno,
+      method = "pls",
+      metric = "RMSE",
+      tuneLength = 60,
+      trcontrol = trainControl('cv', number = 10),
+      preProc = c("zv","center","scale"))
+  
+
+    
+          #trControl = control,
+    # Check CV profile
+    plot(mod1)
+    
+    pdf(paste('Results/Growth/Environment/PLS_', pheno, '_', temp, '.pdf', sep = ''))
+    print(plot(varImp(mod1), 10, main = "PLS-DA"))
+    dev.off()
+    
+  }
+  
+}
+
+
+```
+
