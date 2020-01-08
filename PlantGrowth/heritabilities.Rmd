@@ -23,8 +23,6 @@ lemna <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/U
 randomFiles <- list.files('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Setup/GrowthChamber/', pattern = 'chamberRandomisation_.*_rep', full.names = T)
 randomisations <- lapply(randomFiles, FUN = read.table, header = T, stringsAsFactors = F)
 names(randomisations) <- c('16C_rep1', '16C_rep2', '16C_rep3', '6C_rep1', '6C_rep2', '6C_rep3')
-
-
 ```
 
 ```{r general variables}
