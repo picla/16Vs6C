@@ -21,8 +21,8 @@ knitr::opts_knit$set(root.dir = '/Volumes/nordborg/user/pieter.clauw/Documents/E
 # growth data
 growth <- read_csv('Data/Growth/GWAS/growthPheno.csv')
 # worldclim data
-worldclim <- read_delim('/Volumes/nordborg/user/pieter.clauw/Documents/Source/Accessions/List_2029_latlon_env.txt', delim = '\t')
-clim <- read_csv('/Volumes/nordborg/user/pieter.clauw/Documents/Source/Accessions/araclim.csv')
+worldclim <- read_csv('/Volumes/nordborg/user/pieter.clauw/Documents/Source/Accessions/2029_modified_MN_SH_wc2.0_30s_bilinear.csv')
+#clim <- read_csv('/Volumes/nordborg/user/pieter.clauw/Documents/Source/Accessions/araclim.csv')
 ```
 ```{r general variables}
 temperatures <- c('16C', '6C')
@@ -34,13 +34,15 @@ phenotypes <- c('LGR', 'rosette35DAS')
 #  mutate(autumnTemp = rowMeans(select(., tmean_10, tmean_11, tmean_12)))
 
 growth.long <- growth %>%
+  # remove accesisons 7471 from analysis. this accession lacks known coordinates
+  filter(growth$accession != 7471) %>%
   select(everything(), -autumnTemp) %>%
   pivot_longer(
     cols = contains('_'),
     names_to = c(".value", "temperature"),
     names_sep = '_')
 
-growthClim <- inner_join(growth.long, clim, by = c('accession' = 'id')) %>%
+growthClim <- inner_join(growth.long, worldclim, by = 'accession') %>%
   select(accession, rosette35DAS, LGR, temperature, everything())
 ```
 
@@ -58,7 +60,7 @@ for (pheno in phenotypes)
     
     x <- growthClim %>%
       filter(temperature == temp) %>%
-      select(pheno, everything(), -accession, -nonPheno, -temperature, -lng, -lat, -name, -country, -CS_number, -group) %>%
+      select(pheno, everything(), -accession, -nonPheno, -temperature, -longitude, -latitude) %>%
       select_if(~ !any(is.na(.))) %>%
       model.matrix(formula(.[[pheno]] ~ .), data = .)
     x <- x[,-c(1,2)]
@@ -103,7 +105,7 @@ set.seed(123)
 
       x <- growthClim %>%
         filter(temperature == temp) %>%
-        select(pheno, everything(), -accession, -nonPheno, -temperature, -lng, -lat, -name, -country, -CS_number, -group)
+        select(pheno, everything(), -nonPheno, -accession, -nonPheno, -temperature, -longitude, -latitude)
       
       
       %>%
@@ -112,9 +114,9 @@ set.seed(123)
     # Set up repeated k-fold cross-validation
     train.control <- trainControl(method = "cv", number = 10)
 # Train the model
-    step.model <- train(LGR ~., data = growthClim_WC,
+    step.model <- train(LGR ~., data = x,
                     method = "leapSeq", 
-                    tuneGrid = data.frame(nvmax = 1:20),
+                    tuneGrid = data.frame(nvmax = 1:5),
                     trControl = train.control
                     )
 step.model$results
