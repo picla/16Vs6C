@@ -57,7 +57,7 @@ predictData <- do.call(rbind, predictDataFrames)
 predictData$acn <- as.factor(as.character(predictData$acn))
 
 # predict
-predictData$logArea <- as_tibble(predict(baseModel, newdata = predictData))
+predictData$logArea <- predict(baseModel, newdata = predictData)
 
 # add meta info
 predictData$replicate <- unlist(lapply(predictData$experiment, function(exp){strsplit(exp, split = '_')[[1]][2]}))
@@ -124,7 +124,7 @@ for (t in temperatures)
 
 ## which summary for growth over time has sufficiently high heritabilities
 ```{r data preparation}
-predictData.wide <- predictData %>%
+predictData.wide <- as_tibble(predictData) %>%
   pivot_wider(values_from = logArea, names_from = DAS, names_prefix = 'logArea_DAS_')
 ```
 
@@ -148,8 +148,6 @@ getSlope.ind.noncorr.14.35 <- function(ID)
 }
 
 predictData.wide$LGR_nonCorr_14_35 <- mapply(predictData.wide$ID, FUN = getSlope.ind.noncorr.14.35)
- 
-
 ```
 
 ##### over all time points
@@ -169,7 +167,7 @@ predictData.wide$LGR_nonCorr_all <- mapply(predictData.wide$ID, FUN = getSlope.i
 getSlope.ind.corr <- function(ID, DASs, growth)
 {
   growth.ind <- growth[growth$ID == ID & growth$DAS %in% DASs, ]
-  growth.ind$DAS14 <- growth$emmean[growth$ID == ID & growth$DAS == 14]
+  growth.ind$DAS14 <- growth$logArea[growth$ID == ID & growth$DAS == 14]
   if (any(is.na(growth.ind$logArea))){return(NA)}
   else{
     fit <- lm(logArea ~ DAS14 + DAS, data = growth.ind)
@@ -180,8 +178,45 @@ getSlope.ind.corr <- function(ID, DASs, growth)
 
 ```
 
+
 ##### over all time points
 
+
+
+## Try growthrates package
+```{r growthrates TEST}
+# TODO:tidyverse
+predictData.ind <- predictData[predictData$ID == predictData$ID[1],]
+predictData.ind$area <- exp(predictData.ind$logArea)
+predictData.ind$DAS0 <- predictData.ind$DAS - 15
+
+p     <- c(y0 = min(predictData.ind$area), mumax = 0.5)
+lower <- c(y0 = min(predictData.ind$area) - 500, mumax = 0)
+upper <- c(y0 = min(predictData.ind$area) + 500, mumax = 1)
+
+fit_exp <- fit_growthmodel(FUN = grow_exponential, p = p, predictData.ind$DAS0, predictData.ind$area,
+                        lower = lower, upper = upper)
+
+
+p     <- c(y0 = min(predictData.ind$area), mumax = 0.5, K = max(predictData.ind$area)+20000)
+lower <- c(y0 = min(predictData.ind$area) - 500, mumax = 0, K = max(predictData.ind$area) - 10000)
+upper <- c(y0 = min(predictData.ind$area) + 500, mumax = 1, K = max(predictData.ind$area) + 30000)
+
+fit_log <- fit_growthmodel(FUN = grow_logistic, p = p, predictData.ind$DAS0, predictData.ind$area,
+                        lower = lower, upper = upper)
+
+
+p     <- c(yi = 0.02, ya = 0.001, kw = 0.1, mumax = 0.2, K = 0.1)
+lower <- c(yi = 1e-6, ya = 1e-6, kw = 0,    mumax = 0,   K = 0)
+upper <- c(yi = 0.05, ya = 0.05, kw = 10,   mumax = 5,   K = 0.5)
+
+fit2 <- fit_growthmodel(FUN = grow_twostep, p = p, time = dat$time, y = dat$value,
+                        lower = lower, upper = upper)
+
+coef(fit1)
+
+
+```
 
 
 
