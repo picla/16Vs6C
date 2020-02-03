@@ -1,0 +1,169 @@
+---
+title: "nonlinear_mixedmodel"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(tidyverse)
+library(nlme)
+knitr::opts_knit$set(root.dir = "/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/")
+```
+
+```{r data}
+lemna <- read_delim('Data/Growth/rawdata_combined_annotation_NO.txt', delim = '\t')
+```
+```{r data preparation}
+lemna$ID <- paste(lemna$pot, lemna$experiment, sep = '_')
+lemna$acn <- as.character(lemna$acn)
+lemna$Area[lemna$Area == 0] <- NA
+
+# only use accessions which have data for all replicates
+acns_rep1 <- unique(lemna$acn[lemna$replicate == 'rep1'])
+acns_rep2 <- unique(lemna$acn[lemna$replicate == 'rep2'])
+acns_rep3 <- unique(lemna$acn[lemna$replicate == 'rep3'])
+
+acns_rep123 <- intersect(intersect(acns_rep2, acns_rep3), acns_rep1)
+lemna <- lemna[lemna$acn %in% acns_rep123, ]
+```
+
+```{r subset}
+acns.nr <- 4
+rep.nr <- 3
+temp.nr <- 2
+
+lemna.sub <- lemna %>%
+  filter(acn %in% unique(lemna$acn)[1:acns.nr], replicate %in% unique(lemna$replicate)[1:rep.nr], temperature %in% unique(lemna$temperature)[1:temp.nr]) %>%
+  drop_na(Area) %>%
+  select(ID, acn, experiment, temperature, replicate, DAS_decimal, Area)
+
+lemna.sub.grp <- groupedData(Area ~ DAS_decimal | ID, outer = ~temperature * acn, data = lemna.sub)
+```
+```{r plot over all individuals}
+theme_set(theme_bw())
+
+pl <- ggplot(data=lemna.sub, aes(x=DAS_decimal,y=Area)) +
+  geom_point(aes(col = temperature, shape = replicate), size=2) +
+  geom_line(aes(group = ID, col = temperature))
+
+```
+```{r plot per accession}
+pl + facet_wrap(~acn)
+```
+
+
+
+```{r nls}
+ctrl <- nls.control(maxiter = 1000, warnOnly = T)
+fm1.nls <- nls(Area ~ SSlogis(DAS_decimal, Asym, xmid, scal), data = lemna.sub, control = ctrl)
+plot(fm1.nls)
+```
+
+```{r nlsList}
+fm1.logis.lis <- nlsList(Area ~ SSlogis(DAS_decimal, Asym, xmid, scal), data = lemna.sub.grp, control = ctrl)
+plot(fm1.logis.lis)
+plot(augPred(fm1.logis.lis), level = 2)
+```
+```{r logistic nlme}
+fm1.logis.lis.ranef <- as.data.frame(ranef(fm1.logis.lis))
+nonconverge <- rownames(fm1.logis.lis.ranef[is.na(fm1.logis.lis.ranef$Asym), ])
+lemna.sub.grp.conv <- lemna.sub.grp[!lemna.sub.grp$ID %in% nonconverge, ]
+
+fm2.logis.lis <- nlsList(Area ~ SSlogis(DAS_decimal, Asym, xmid, scal), data = lemna.sub.grp.conv, control = ctrl)
+
+fm1.logis.nlme <- nlme(fm2.logis.lis, data = lemna.sub.grp.conv)
+fm1.logis.nlme
+plot(fm1.logis.nlme)
+plot(augPred(fm1.logis.nlme))
+```
+Clear heteroscedasticity
+much more 6C samples are not-converging compared to 16C
+
+
+```{r logistic nlme hetero}
+lemna.sub.grp.conv.df <- as.data.frame(lemna.sub.grp.conv)
+
+
+fm2.logis.lis <- nlsList(Area ~ SSlogis(DAS_decimal, Asym, xmid, scal)| acn, data = lemna.sub.grp.conv.df, control = ctrl)
+
+fm2.logis.nlme <- nlme(fm2.logis.lis, fixed = list(xmid ~temperature * acn))
+plot(fm2.logis.nlme)
+
+
+
+fm2.logis.nlme <- nlme(Area ~ SSlogis(DAS_decimal, Asym, xmid, scal)| ID, data = lemna.sub.grp.conv.df, fixed = list(xmid ~temperature, Asym ~temperature))
+
+
+
+```
+
+
+
+
+```{r power law}
+fmla.pow <- as.formula("~(M0^(1-beta) + r*x*(1-beta))^(1/(1-beta))")
+Init.pow <- function(mCall, LHS, data){
+    xy <- sortedXyData(mCall[["x"]], LHS, data)
+    if(nrow(xy) < 4) {stop("Too few distinct x values to fit a power-law")}
+	r    <-coef(lm(log(y) ~ x, xy))[2]    # Use the slope from a log fit to the data as an initial guess for r
+	M0   <- min(xy$y)		              # Use the minimum y value as an initial guess for M0
+	beta <- 0.9	                          # give initial guess of beta as 0.9. don't use beta = 1, as it's undefined (1/0)
+    value <- c(M0, r, beta) 
+    names(value) <- mCall[c("M0", "r", "beta")]
+ 	return(value)
+	}
+SS.pow  <- selfStart(fmla.pow, initial = Init.pow, parameters = c("M0", "r", "beta"))
+
+
+
+
+
+fm3.lis <- nlsList(Area ~ SS.pow(DAS_decimal, M0, r, beta), data = lemna.sub.grp)
+plot(fm3.lis)
+plot(augPred(fm3.lis))
+
+
+# Self-starting power law function written by C. Scherber
+
+powermodel=function(x,a,b,c)
+{a+b*x^c}
+
+powermodelInit=function(mCall,LHS,data){
+xy=sortedXyData(mCall[["x"]],LHS,data)
+lmFit1=lm(xy[,"y"]~1) #for "intercept", a
+lmFit2=lm(log(xy[,"y"])~log(xy[,"x"])) #for b and c
+coefs1=coef(lmFit1)
+coefs2=coef(lmFit2)
+a=coefs1
+b=exp(coefs2[1])
+c=coefs2[2]
+value=c(a,b,c)
+names(value)=mCall[c("a","b","c")]
+value
+}
+
+SSpower=selfStart(powermodel,powermodelInit,c("a","b","c"))
+
+##
+
+fm4.lis <- nlsList(Area ~ SSpower(DAS_decimal, a, b, c), data = lemna.sub.grp)
+plot(fm4.lis)
+plot(augPred(fm4.lis))
+
+fm4.lis.ranef <- as.data.frame(ranef(fm4.lis))
+nonconverge <- rownames(fm4.lis.ranef[is.na(fm4.lis.ranef$a), ])
+
+## self-written power law selfstart
+
+
+```
+
+
+```{r nlme covar structure}
+fm2.nlme <- update(fm1.nlme, fixed = list(Asym ~ temperature))
+```
+
+Setup logistic regression
+Afterwards djust model for exponential.
+Compare with anova
