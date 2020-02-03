@@ -1,0 +1,133 @@
+---
+title: "sampleSelection_RNA_03022020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+options(stringsAsFactors = F)
+library(googlesheets4)
+library(tidyverse)
+knitr::opts_knit$set(root.dir = "/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/")
+```
+
+```{r functions}
+# FUNCTIONS
+removeUsedSamples <- function(boxname)
+{
+  temp <- strsplit(boxname, split= '_')[[1]][2]
+  rep <- strsplit(boxname, split = "\\_|\\.")[[1]][3]
+  exp <- paste(temp, rep, sep = '_') 
+  box_all <- as.data.frame(boxes[[boxname]])
+  keepers <- c()
+  #outlier <- c()
+  for (i in c(1:dim(box_all)[1]))
+  {
+    # skip if sample is empty
+    if (length(box_all[i, 7]) > 1)
+    {
+      if (!is.na(box_all[i, 7]))
+      {
+        if (box_all[i, 8] == 'yes'){next}
+      }  
+    }
+    
+    pot <- paste(box_all[i, 1], box_all[i, 2], sep = '_')
+    box <- box_all[i, 4]
+    boxCol <- box_all[i, 5]
+    boxRow <- box_all[i, 6]
+    used <- dim(usedSamples[usedSamples$Experiment %in% exp & usedSamples$Box %in% box & usedSamples$Box_column %in% boxCol & usedSamples$Box_row %in% boxRow, ])[1]
+    #outlierdays <- length(outliers$DAS[outliers$temp == temp & outliers$rep == rep & outliers$pot == pot])
+    # save row numbers to keep
+    if (used == 0)
+    {
+      keepers <- c(keepers, i)
+    }
+  }
+  # 
+  cleanBox <- box_all[keepers, ]
+  return(cleanBox)
+}
+```
+
+
+
+```{r general variables}
+temperatures <- c('16C', '6C')
+replicates <- c('rep1', 'rep2', 'rep3')
+```
+
+# select additional RNA-seq samples.
+
+```{r data}
+# get boxes data
+boxFiles <- list.files('Setup/', pattern = 'boxes_.*C_rep[1,2,3].txt', full.names = T)
+boxes <- lapply(boxFiles, read.table, header = T, sep = '\t')
+names(boxes) <- list.files('Setup/', pattern = 'boxes_.*C_rep[1,2,3].txt')
+
+# metabolite sample overview
+sampleOverview <- read_sheet("1n-t7Ftpk55eHTf4OLvwgz2os-ux0vNRYz_Z0g0uoaTI", sheet = 1, skip = 1)
+
+# get RNA samples
+RNAfiles <- list.files('Setup/Metabolite_RNA_selection/', pattern = 'RNA_.*.txt', full.names = T)
+RNAsamples <- lapply(RNAfiles, read.table, header = T, sep = '\t')
+names(RNAsamples) <- list.files('Setup/Metabolite_RNA_selection/', pattern = 'RNA_.*.txt')
+
+# samples to select
+samples <- tibble(
+  accession = c(6017, 9559, rep(c(8242, 9075, 9433, 9888), each = 6)),
+  temperature = c(rep('6C', 2), rep(rep(temperatures, each = 3), 4)),
+  replicate = c(rep('rep1', 2), rep(replicates, 8))
+)
+```
+
+
+```{r remove used samples}
+# remove lost and used samples as indicated in boxFiles #
+# gather all used samples
+usedSamples <- sampleOverview[, c('Experiment', 'Box', 'Box_column', 'Box_row')]
+# add RNA samples
+for (RNAsample in RNAsamples)
+{
+  RNAsample <- as.data.frame(RNAsample)
+  RNAsample$Experiment[RNAsample$Experiment == '16C'] <- '16C_rep1'
+  RNAsample$Experiment[RNAsample$Experiment == '6C_b'] <- '6C_rep1'
+  usedSamples <- rbind(usedSamples, RNAsample[, c('Experiment', 'Box', 'Box_column', 'Box_row')])  
+}
+usedSamples<- na.omit(usedSamples)
+# remove used samples from boxes
+cleanBoxes <- lapply(names(boxes), FUN = removeUsedSamples)
+names(cleanBoxes) <- names(boxes)
+# remove samples that were lost
+for (i in length(cleanBoxes))
+{
+  cleanBox <- cleanBoxes[[i]]
+  # remove everything with information in lostSample
+  cleanBox <- cleanBox[is.na(cleanBox[, 8]), ]
+  cleanBoxes[[i]] <- cleanBox
+}
+```
+
+
+```{r selection}
+selection <- data.frame('Tray' = character(), 'Tray_coordinate' = character(), 'accession' = character(), 'Experiment' = character(), 'Box' = numeric(), 'Box_column' = character(), 'Box_row' = character())
+
+set.seed(4)
+for (i in 1:nrow(samples))
+{
+  acn <- samples$accession[i]
+  boxName <- paste('boxes_', samples$temperature[i], '_', samples$replicate[i], '.txt', sep = '')
+  cleanBox <- cleanBoxes[[boxName]]
+  potentialSamples <- cleanBox[cleanBox[, 3] == acn, ]
+  if (nrow(potentialSamples) == 0){print(paste('no samples left for accession', acn, 'in experiment', exp)); next()}
+  replacement <- potentialSamples[sample(nrow(potentialSamples), 1), ]
+  selection.sub <- data.frame('Tray' = replacement[,1], 'Tray_coordinate' = replacement[,2], 'accession' = replacement[,3], 'Experiment' = exp, 'Box' = replacement[,4], 'Box_column' = replacement[,5], 'Box_row' = replacement[,6])
+  selection <- rbind(selection, selection.sub)
+}
+
+selection <- selection[order(selection$Box, selection$Experiment), ]
+write.table(selection, file = 'Setup/Metabolite_RNA_selection/RNA_7_selection.txt', quote = F, row.names = F, sep = '\t')
+```
+
+
