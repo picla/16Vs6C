@@ -82,17 +82,36 @@ much more 6C samples are not-converging compared to 16C
 
 
 ```{r logistic nlme hetero}
+ctrl <- nlmeControl(msMaxIter = 500, maxIter = 500)
+
 lemna.sub.grp.conv.df <- as.data.frame(lemna.sub.grp.conv)
 
 
-fm2.logis.lis <- nlsList(Area ~ SSlogis(DAS_decimal, Asym, xmid, scal)| acn, data = lemna.sub.grp.conv.df, control = ctrl)
+fm2.logis.lis <- nlsList(Area ~ SSlogis(DAS_decimal, Asym, xmid, scal)| ID, data = lemna.sub.grp.conv.df, control = ctrl)
 
-fm2.logis.nlme <- nlme(fm2.logis.lis, fixed = list(xmid ~temperature * acn))
+fm2.logis.nlme <- nlme(fm2.logis.lis, fixed = list(xmid ~temperature * acn, Asym ~ temperature * acn, scal ~ temeprature * acn))
 plot(fm2.logis.nlme)
+fm3.logis.nlme <- update(fm2.logis.nlme, correlation = corCAR1(form = ~ DAS_decimal | ID), control = ctrl)
+plot(fm3.logis.nlme)
 
+anova(fm2.logis.nlme, fm3.logis.nlme)
 
+fm4.logis.lis <-  nlsList(Area ~ SSlogis(DAS_decimal, Asym, xmid, scal)|ID, data = lemna.sub.grp.conv.df, control = ctrl)
+fm4.logis.nlme <- nlme(fm4.logis.lis,
+                       groups = ~ ID,
+                       fixed = xmid + Aysm + scal ~ temperature * acn,
+                       correlation = corCAR1(form = ~ DAS_decimal | ID),
+                       control = ctrl)
 
-fm2.logis.nlme <- nlme(Area ~ SSlogis(DAS_decimal, Asym, xmid, scal)| ID, data = lemna.sub.grp.conv.df, fixed = list(xmid ~temperature, Asym ~temperature))
+plot(fm4.logis.nlme)
+fm4.logis.nlme
+
+plot(ranef(fm4.logis.nlme, augFrame = T), form = ~ temperature * acn)
+
+fm5.logis.nlme <- update(fm4.logis.nlme,
+                         random = scal ~ 1,
+                         control = ctrl)
+
 
 
 
