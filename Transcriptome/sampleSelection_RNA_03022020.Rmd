@@ -117,7 +117,10 @@ set.seed(4)
 for (i in 1:nrow(samples))
 {
   acn <- samples$accession[i]
-  boxName <- paste('boxes_', samples$temperature[i], '_', samples$replicate[i], '.txt', sep = '')
+  temp <- samples$temperature[i]
+  rep <- samples$replicate[i]
+  exp <- paste(temp, rep, sep = '_')
+  boxName <- paste('boxes_', temp, '_', rep, '.txt', sep = '')
   cleanBox <- cleanBoxes[[boxName]]
   potentialSamples <- cleanBox[cleanBox[, 3] == acn, ]
   if (nrow(potentialSamples) == 0){print(paste('no samples left for accession', acn, 'in experiment', exp)); next()}
@@ -126,7 +129,7 @@ for (i in 1:nrow(samples))
   selection <- rbind(selection, selection.sub)
 }
 
-selection <- selection[order(selection$Box, selection$Experiment), ]
+selection <- selection[order(selection$Experiment, selection$Box), ]
 write.table(selection, file = 'Setup/Metabolite_RNA_selection/RNA_7_selection.txt', quote = F, row.names = F, sep = '\t')
 ```
 
