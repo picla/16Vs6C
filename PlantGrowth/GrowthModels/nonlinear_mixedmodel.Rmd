@@ -169,9 +169,12 @@ fm3.power.nlme <- update(fm2.power.nlme,
 anova(fm2.power.nlme, fm3.power.nlme)
 
 
-fm4.power.nlme <- update(fm3.power.nlme,
-                           random = a + b + c ~ experiment,
+fm4.power.nlme <- update(fm2.power.nlme,
+                           random = list(experiment = a ~1, ID = a ~ 1),
                            control = ctrl)
+
+
+
 # try only a (intercept) depending on experiment.
 fm5.power.nlme <- update(fm3.power.nlme,
                            random = list(a ~ experiment, b + c ~ 1),
@@ -182,7 +185,7 @@ fm5.power.nlme <- update(fm3.power.nlme,
 fm6.power.nlme <- update(fm3.power.nlme,
                          weights = varExp(form = ~ DAS),
                          control = ctrl)
-plpot(fm6.power.nlme)
+plot(fm6.power.nlme)
 # CAR needed? Phi = 0
 fm7.power.nlme <- update(fm2.power.nlme,
                          weights = varExp(form = ~DAS),
@@ -192,243 +195,53 @@ anova(fm6.power.nlme, fm7.power.nlme)
 
 # include experiment as random effect?
 fm8 <- update(fm7.power.nlme,
-              random = list(a + b +  c ~ acn * temperature),
+              random = list(experiment = pdCompSymm( ~ acn - 1)),
               control = ctrl)
 
 
 
-# Adding CAR correlation structure improves the model a bit does not decrease the heteroscedascity.
-fm4.power.nlme <- update(fm2.power.nlme,
-                         correlation = corCAR1(form = ~ DAS_decimal | ID),
-                         weights = varPower(form = ~ DAS | ID),
-                         control = ctrl)
 
-
-fm5.power.nlme <- update(fm2.power.nlme,
-                         correlation=corCAR1(form = ~ 1 | ID),
-                         weights = varIdent(form = ~ 1 | DAS),
-                         control = ctrl)
-
-
-
-
-# shoudl be toeplitz
-corARMA(,form=~1|id, p=3, q=0)
-
+# final model => fm7
+plot(augPred(fm7.power.nlme))
 ```
+the best model is fm7.
+It correct for heteroscedasticity and fits the data well (visually).
+There is no correction for experiment effect however. All replicates are considered to be independent.
+I could not find a way to correct for this however.
+What will be done is running the model for acn * temperature interaction, to capture overall effects.
+Additionally the mnodel will be run with acn * experiment, to egt experiment specific estimates.
 
 
+```{r final model and estimates}
+ctrl <- nlmeControl(msMaxIter = 200, maxIter = 50)
+# run nlsList for starting
+fm.lis <- nlsList(Area ~ SSpower(DAS, a, b, c),
+                         data = lemna.sub.grp.DAS,
+                         control = ctrl)
 
-
-
-
-```{r logistic nlme hetero}
-ctrl <- nlmeControl(msMaxIter = 500, maxIter = 500)
-
-lemna.sub.grp.conv.df <- as.data.frame(lemna.sub.grp.conv)
-lemna.sub.grp.df <- as.data.frame(lemna.sub.grp)
-
-fm2.logis.lis <- nlsList(Area ~ SSlogis(DAS_decimal, Asym, xmid, scal)| ID, data = lemna.sub.grp.df, control = ctrl)
-
-fm2.logis.nlme <- nlme(fm2.logis.lis, control = ctrl)
-
-fm3.logis.nlme <- update(fm3.logis.nlme,
-                         fixed = Asym ~ temperature)                   
-                       
-                       
-                       , fixed = list(xmid ~temperature * acn, Asym ~ temperature * acn, scal ~ temperature * acn), data = lemna.sub.grp.conv.df)
-
-
-
-plot(fm2.logis.nlme)
-fm3.logis.nlme <- update(fm2.logis.nlme, correlation = corCAR1(form = ~ DAS_decimal | ID), control = ctrl)
-plot(fm3.logis.nlme)
-
-anova(fm2.logis.nlme, fm3.logis.nlme)
-
-fm4.logis.lis <-  nlsList(Area ~ SSlogis(DAS_decimal, Asym, xmid, scal)|ID, data = lemna.sub.grp.conv.df, control = ctrl)
-fm4.logis.nlme <- nlme(fm4.logis.lis,
-                       groups = ~ ID,
-                       fixed = xmid + Aysm + scal ~ temperature * acn,
-                       correlation = corCAR1(form = ~ DAS_decimal | ID),
+# run simple mnodel to obtain starting values
+fm.nlme.1 <- nlme(fm1.power.lis, 
                        control = ctrl)
 
+# get starting values
+fm.nlme.1.FE <- fixef(fm1.power.nlme)
+n.acn <- length(unique(lemna.sub.grp.DAS$acn)) - 1
+n.temp <- length(unique(lemna.sub.grp.DAS$temperature)) - 1
+n <- n.acn + n.temp + n.acn * n.temp
+fm.start <- c(fm1.power.nlme.FE[1], rep(0, n), fm1.power.nlme.FE[2], rep(0, n), fm1.power.nlme.FE[3],rep(0, n))
 
-fm5.logis.nlme <- nlme(fm4.logis.lis,
-                       groups = ~ ID,
-                       data = lemna.sub.grp.conv.df,
-                       fixed = list(Asym ~ temperature, xmid ~ 1),
-                       control = ctrl)
-
-fm1CO2 <- nlme(uptake ~ SSasympOff(conc , Asym, lrc , cO) , data = CO2, fixed = Asym + lrc + cO ~ 1, control = ctrl) 
-fm2CO2 <- update(fm1CO2, random = Asym + lrc ~ 1) 
-fm2CO2.RE <- ranef(fm2CO2, augFrame = T) 
-fm2CO2.RE
-plot(fm2CO2.RE, form = ~ Type * Treatment) 
-
-fm3CO2 <- update(fm2CO2,
-                 fixed = list (Asym + lrc ~ Type * Treatment, cO ~ 1),
-                 start = c(32.4, 0, 0, 0, -4.6, 0, 0, 0, 49.3)) 
-
-
-
-
-test.grpd <- groupedData(Area ~ DAS_decimal | ID, data = lemna.sub.grp.df)
-fm1.test <- nlme(Area ~ SSlogis(DAS, Asym, xmid, scal),
-                 data = test.grpd,
-                 fixed = Asym + xmid + scal ~ acn * experiment,
-                 control = ctrl)
-
-
-lemna.sub.grp.df$DAS <-round(lemna.sub.grp.df$DAS_decimal)
-lemna.sub.grp.df <- lemna.sub.grp.df.BU
-lemna.sub.grp.df <- lemna.sub.grp.df %>%
-  select(ID, acn, temperature, DAS, Area)
-  
-  [lemna.sub.grp.df$acn %in% c(992, 6038), ]
-
-
-
-test.grpd <- groupedData(Area ~ DAS | ID, data = lemna.sub.grp.df)
-
-fm1.test.power <- nlme(Area ~ SSpower(DAS, a, b, c),
-                 data = test.grpd,
-                 fixed = a + b + c ~ 1,
-                 control = ctrl)
-
-fm2.test.power <- update(fm1.test.power,
-                         fixed = list(a ~ temperature, b + c ~ 1),
-                         start = c(fixef(fm2.test.power)[1], 0, fixef(fm2.test.power)[2:3]))
-
-
-fm2.test.power <- nlme(Area ~ SSpower(DAS, a, b, c),
-                       groups = ~ ID,
-                       data = lemna.sub.grp.df,
-                       fixed = a + b + c ~ 1,
-                       control = ctrl,
-                       start = fixef(fm1.test.power))
-
-fm3.test.power <- update(fm2.test.power,
-                         data = lemna.sub.grp.df,
-                         fixed = list(a ~ temperature, b + c  ~ 1),
-                         start = c(fixef(fm2.test.power)[1], 0, fixef(fm2.test.power)[2:3]))
-
-
-fm2.test.power <- update(fm1.test.power,
-                         data = test.grpd,
-                         fixed = a ~ temperature)
-
-
-fm1.test <- nlme(Area ~ SSpower(DAS_decimal, a, b, c), data = test.grpd, fixed = a + b + b ~ temperature, control = ctrl)
-update(fm1.test,
-       fixed = a + b + c ~ acn * temperature )
-
-
-
-
-
-
-plot(fm4.logis.nlme)
-fm4.logis.nlme
-
-plot(ranef(fm4.logis.nlme, augFrame = T), form = ~ temperature * acn)
-
-fm5.logis.nlme <- update(fm4.logis.nlme,
-                         random = scal ~ 1,
+fm.nlme.2 <- update(fm1.power.nlme,
+                         fixed = list(a + b + c ~ acn * temperature),
+                         start = fm.start,
+                         weights = varExp(form = ~DAS),
                          control = ctrl)
-
-
-
-
-```
-
-```{r glm}
-pheno <- lemna.sub %>%
-  group_by(ID) %>%
-  mutate(area_scaled = scales::rescale(Area)) %>%
-  ungroup
-  
-  
-  
-
-
-model <- glm(area_scaled ~ DAS_decimal * acn * temperature, family=quasibinomial(link='logit'), data=pheno)
-
-pheno$pred <- predict(model, pheno, type = 'response')
-i <- 1
-plot(pheno$DAS_decimal[pheno$ID == unique(pheno$ID)[i]], pheno$area_scaled[pheno$ID == unique(pheno$ID)[i]]) + lines(pheno$DAS_decimal[pheno$ID == unique(pheno$ID)[i]], pheno$pred[pheno$ID == unique(pheno$ID)[i]])
-
-```
-GLM is not doing a good job.
-forces logistic fit too much on the data, whcih look more power law.
-
-
-```{r power law}
-fmla.pow <- as.formula("~(M0^(1-beta) + r*x*(1-beta))^(1/(1-beta))")
-Init.pow <- function(mCall, LHS, data){
-    xy <- sortedXyData(mCall[["x"]], LHS, data)
-    if(nrow(xy) < 4) {stop("Too few distinct x values to fit a power-law")}
-	r    <-coef(lm(log(y) ~ x, xy))[2]    # Use the slope from a log fit to the data as an initial guess for r
-	M0   <- min(xy$y)		              # Use the minimum y value as an initial guess for M0
-	beta <- 0.9	                          # give initial guess of beta as 0.9. don't use beta = 1, as it's undefined (1/0)
-    value <- c(M0, r, beta) 
-    names(value) <- mCall[c("M0", "r", "beta")]
- 	return(value)
-	}
-SS.pow  <- selfStart(fmla.pow, initial = Init.pow, parameters = c("M0", "r", "beta"))
-
-
-
-
-
-fm3.lis <- nlsList(Area ~ SS.pow(DAS_decimal, M0, r, beta), data = lemna.sub.grp)
-plot(fm3.lis)
-plot(augPred(fm3.lis))
-
-
-# Self-starting power law function written by C. Scherber
-
-powermodel=function(x,a,b,c)
-{a+b*x^c}
-
-powermodelInit=function(mCall,LHS,data){
-xy=sortedXyData(mCall[["x"]],LHS,data)
-lmFit1=lm(xy[,"y"]~1) #for "intercept", a
-lmFit2=lm(log(xy[,"y"])~log(xy[,"x"])) #for b and c
-coefs1=coef(lmFit1)
-coefs2=coef(lmFit2)
-a=coefs1
-b=exp(coefs2[1])
-c=coefs2[2]
-value=c(a,b,c)
-names(value)=mCall[c("a","b","c")]
-value
-}
-
-SSpower=selfStart(powermodel,powermodelInit,c("a","b","c"))
-
-##
-
-fm4.lis <- nlsList(Area ~ SSpower(DAS_decimal, a, b, c), data = lemna.sub.grp)
-plot(fm4.lis)
-plot(augPred(fm4.lis))
-
-fm4.lis.ranef <- as.data.frame(ranef(fm4.lis))
-nonconverge <- rownames(fm4.lis.ranef[is.na(fm4.lis.ranef$a), ])
-
-## self-written power law selfstart
-
-
 ```
 
 
-```{r nlme covar structure}
-fm2.nlme <- update(fm1.nlme, fixed = list(Asym ~ temperature))
-```
 
-Setup logistic regression
-Afterwards djust model for exponential.
-Compare with anova
+
+
+
 
 
 
