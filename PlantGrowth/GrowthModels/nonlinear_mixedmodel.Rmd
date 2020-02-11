@@ -67,7 +67,7 @@ lemna <- lemna[lemna$acn %in% acns_rep123, ]
 ```
 
 ```{r subset}
-acns.nr <- 2
+acns.nr <- 10
 rep.nr <- 3
 temp.nr <- 2
 
@@ -212,29 +212,42 @@ What will be done is running the model for acn * temperature interaction, to cap
 Additionally the mnodel will be run with acn * experiment, to egt experiment specific estimates.
 
 
-```{r final model and estimates}
-ctrl <- nlmeControl(msMaxIter = 200, maxIter = 50)
+```{r final model}
+ctrl <- nlmeControl(msMaxIter = 200, maxIter = 100)
 # run nlsList for starting
 fm.lis <- nlsList(Area ~ SSpower(DAS, a, b, c),
                          data = lemna.sub.grp.DAS,
                          control = ctrl)
 
 # run simple mnodel to obtain starting values
-fm.nlme.1 <- nlme(fm1.power.lis, 
+fm.nlme.1 <- nlme(fm.lis, 
                        control = ctrl)
 
 # get starting values
-fm.nlme.1.FE <- fixef(fm1.power.nlme)
+fm.nlme.1.FE <- fixef(fm.nlme.1)
 n.acn <- length(unique(lemna.sub.grp.DAS$acn)) - 1
 n.temp <- length(unique(lemna.sub.grp.DAS$temperature)) - 1
 n <- n.acn + n.temp + n.acn * n.temp
-fm.start <- c(fm1.power.nlme.FE[1], rep(0, n), fm1.power.nlme.FE[2], rep(0, n), fm1.power.nlme.FE[3],rep(0, n))
+fm.start <- c(fm.nlme.1.FE[1], rep(0, n), fm.nlme.1.FE[2], rep(0, n), fm.nlme.1.FE[3],rep(0, n))
 
-fm.nlme.2 <- update(fm1.power.nlme,
-                         fixed = list(a + b + c ~ acn * temperature),
+fm.start <- c(fm.nlme.1.FE[1], rep(0, n), fm.nlme.1.FE[2], rep(0, n), fm.nlme.1.FE[3], rep(0, (n.acn + n.temp)))
+
+fm.nlme.2 <- update(fm.nlme.1,
+                         fixed = list(a + b ~ acn * temperature, c ~ acn + temperature),
                          start = fm.start,
-                         weights = varExp(form = ~DAS),
                          control = ctrl)
+anova(fm.nlme.2)
+
+# Try with DAS instead of DAS_decimal
+fm.nlme.3 <- update(fm.nlme.2,
+                         start = fm.start,
+                         weights = varPower(form = ~ DAS_decimal |  temperature),
+                         control = ctrl)
+
+
+weights = varPower(form = ~ DAS_decimal | temperature)
+
+
 ```
 
 
