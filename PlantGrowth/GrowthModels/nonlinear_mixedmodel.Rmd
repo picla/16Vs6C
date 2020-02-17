@@ -213,7 +213,7 @@ Additionally the mnodel will be run with acn * experiment, to egt experiment spe
 
 
 ```{r final model}
-ctrl <- nlmeControl(msMaxIter = 200, maxIter = 100)
+ctrl <- nlmeControl(msMaxIter = 1000, maxIter = 1000, opt = 'nlminb')
 # run nlsList for starting
 fm.lis <- nlsList(Area ~ SSpower(DAS, a, b, c),
                          data = lemna.sub.grp.DAS,
@@ -238,16 +238,45 @@ fm.nlme.2 <- update(fm.nlme.1,
                          control = ctrl)
 anova(fm.nlme.2)
 
-# Try with DAS instead of DAS_decimal
-fm.nlme.3 <- update(fm.nlme.2,
+
+# fm.nlme.3 <- update(fm.nlme.2,
                          start = fm.start,
-                         weights = varPower(form = ~ DAS_decimal |  temperature),
+                         weights = varPower(form = ~ DAS |  temperature),
                          control = ctrl)
 
+# start again here (thursday evening)
+fm.nlme.4 <- update(fm.nlme.2,
+                         start = fixef(fm.nlme.2),
+                         weights = varPower(form = ~ DAS),
+                         control = ctrl,
+                         verbose = T)
 
-weights = varPower(form = ~ DAS_decimal | temperature)
+fm.nlme.5 <- update(fm.nlme.2,
+                    start = fixef(fm.nlme.2),
+                    correlation = corCAR1(form = ~ DAS_decimal),
+                    control = ctrl,
+                    verbose = T)
+
+fm.nlme.6 <- update(fm.nlme.5,
+                    start = fixef(fm.nlme.5),
+                    random = a + b + c ~ experiment,
+                    control = ctrl,
+                    verbose = T)
 
 
+# change random effects?
+
+
+
+fm.nlme.6 <- update(fm.nlme.2,
+                    start = fixef(fm.nlme.2),
+                    weights = varPower(form = ~ DAS),
+                    random = a ~ experiment,
+                    control = ctrl,
+                    verbose = T)
+
+
+anova(fm.nlme.3, fm.nlme.5)
 ```
 
 
