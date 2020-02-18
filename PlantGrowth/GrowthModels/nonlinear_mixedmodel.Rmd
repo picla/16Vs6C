@@ -239,12 +239,7 @@ fm.nlme.2 <- update(fm.nlme.1,
 anova(fm.nlme.2)
 
 
-# fm.nlme.3 <- update(fm.nlme.2,
-                         start = fm.start,
-                         weights = varPower(form = ~ DAS |  temperature),
-                         control = ctrl)
 
-# start again here (thursday evening)
 fm.nlme.4 <- update(fm.nlme.2,
                          start = fixef(fm.nlme.2),
                          weights = varPower(form = ~ DAS),
@@ -259,11 +254,13 @@ fm.nlme.5 <- update(fm.nlme.2,
 
 fm.nlme.6 <- update(fm.nlme.5,
                     start = fixef(fm.nlme.5),
-                    random = a + b + c ~ experiment,
+                    weights = varPower(form = ~ DAS),
+                    random = pdDiag(a ~ temperature),
                     control = ctrl,
                     verbose = T)
 
-
+# try 
+weights = varPower(form = ~ DAS | temperature)
 # change random effects?
 
 
