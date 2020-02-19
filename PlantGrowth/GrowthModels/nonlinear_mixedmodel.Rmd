@@ -219,7 +219,7 @@ fm.lis <- nlsList(Area ~ SSpower(DAS, a, b, c),
                          data = lemna.sub.grp.DAS,
                          control = ctrl)
 
-# run simple mnodel to obtain starting values
+# run simple model to obtain starting values
 fm.nlme.1 <- nlme(fm.lis, 
                        control = ctrl)
 
@@ -227,17 +227,16 @@ fm.nlme.1 <- nlme(fm.lis,
 fm.nlme.1.FE <- fixef(fm.nlme.1)
 n.acn <- length(unique(lemna.sub.grp.DAS$acn)) - 1
 n.temp <- length(unique(lemna.sub.grp.DAS$temperature)) - 1
+n.experiment <- length(unique(lemna.sub.grp.DAS$experiment)) - 1
 n <- n.acn + n.temp + n.acn * n.temp
 fm.start <- c(fm.nlme.1.FE[1], rep(0, n), fm.nlme.1.FE[2], rep(0, n), fm.nlme.1.FE[3],rep(0, n))
 
-fm.start <- c(fm.nlme.1.FE[1], rep(0, n), fm.nlme.1.FE[2], rep(0, n), fm.nlme.1.FE[3], rep(0, (n.acn + n.temp)))
+fm.start.2 <- c(fm.nlme.1.FE[1], rep(0, n), fm.nlme.1.FE[2], rep(0, n), fm.nlme.1.FE[3], rep(0, (n.acn + n.temp)))
 
 fm.nlme.2 <- update(fm.nlme.1,
                          fixed = list(a + b ~ acn * temperature, c ~ acn + temperature),
-                         start = fm.start,
+                         start = fm.start.2,
                          control = ctrl)
-anova(fm.nlme.2)
-
 
 
 fm.nlme.4 <- update(fm.nlme.2,
@@ -273,7 +272,6 @@ fm.nlme.6 <- update(fm.nlme.2,
                     verbose = T)
 
 
-anova(fm.nlme.3, fm.nlme.5)
 ```
 
 
