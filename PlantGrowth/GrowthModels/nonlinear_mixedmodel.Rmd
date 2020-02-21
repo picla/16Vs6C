@@ -253,13 +253,13 @@ fm.nlme.5 <- update(fm.nlme.2,
 
 fm.nlme.6 <- update(fm.nlme.5,
                     start = fixef(fm.nlme.5),
-                    weights = varPower(form = ~ DAS),
-                    random = pdDiag(a ~ temperature),
+                    random = pdDiag(a + b + c ~ acn * temperature),
                     control = ctrl,
                     verbose = T)
 
 # try 
-weights = varPower(form = ~ DAS | temperature)
+random = list(experiment = a + b + c ~ 1, ID = pdBlocked(a + b ~ acn * temperature, c ~ acn + temperature))
+random = pdBlocked(a + b ~ acn * temperature, c ~ acn + temperature)
 # change random effects?
 
 
@@ -274,6 +274,9 @@ fm.nlme.6 <- update(fm.nlme.2,
 
 ```
 
+```{r get growth rates}
+
+```
 
 
 
