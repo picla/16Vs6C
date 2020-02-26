@@ -1,0 +1,148 @@
+---
+title: "nonlinear_mixedmodel_postJose"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(tidyverse)
+library(nlme)
+knitr::opts_knit$set(root.dir = "/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/")
+```
+```{r function}
+# self-starting nonlinear power law function in R
+# Written by C. Scherber, 4th December 2013
+# http://www.christoph-scherber.de/self-starting%20power%20law%20function.txt
+
+# Please acknowledge me should you use this function in publications.
+# note that response and explanatory variables need to be strictly positive.
+
+powermodel=function(x,a,b,c)
+{a+b*x^c}
+
+powermodelInit=function(mCall,LHS,data){
+    xy=sortedXyData(mCall[["x"]],LHS,data)
+    lmFit1=lm(xy[,"y"]~1) #for "intercept", a
+    lmFit2=lm(log(xy[,"y"])~log(xy[,"x"])) #for b and c
+    coefs1=coef(lmFit1)
+    coefs2=coef(lmFit2)
+    a=coefs1
+    b=exp(coefs2[1])
+    c=coefs2[2]
+    value=c(a,b,c)
+    names(value)=mCall[c("a","b","c")]
+    value
+}
+
+SSpower=selfStart(powermodel,powermodelInit,c("a","b","c"))
+
+```
+
+```{r data}
+lemna <- read_delim('Data/Growth/rawdata_combined_annotation_NO.txt', delim = '\t')
+```
+```{r data preparation}
+lemna$ID <- paste(lemna$pot, lemna$experiment, sep = '_')
+lemna$acn <- as.character(lemna$acn)
+lemna$Area[lemna$Area == 0] <- NA
+
+# only use accessions which have data for all replicates
+acns_rep1 <- unique(lemna$acn[lemna$replicate == 'rep1'])
+acns_rep2 <- unique(lemna$acn[lemna$replicate == 'rep2'])
+acns_rep3 <- unique(lemna$acn[lemna$replicate == 'rep3'])
+
+acns_rep123 <- intersect(intersect(acns_rep2, acns_rep3), acns_rep1)
+lemna <- lemna[lemna$acn %in% acns_rep123, ]
+```
+
+```{r subset}
+acns.nr <- 249
+rep.nr <- 3
+temp.nr <- 2
+
+lemna.sub <- lemna %>%
+  filter(acn %in% unique(lemna$acn)[1:acns.nr], replicate %in% unique(lemna$replicate)[1:rep.nr], temperature %in% unique(lemna$temperature)[1:temp.nr]) %>%
+  drop_na(Area) %>%
+  select(ID, acn, experiment, temperature, replicate, DAS_decimal, Area)
+
+lemna.sub <- lemna.sub %>%
+  mutate(DAS = round(DAS_decimal),
+         ID = as.factor(ID),
+         acn = as.factor(acn),
+         temperature = as.factor(temperature),
+         replicate = as.factor(replicate),
+         experiment = as.factor(experiment))
+
+lemna.sub.grp.DAS <- groupedData(Area ~ DAS | acn, data = lemna.sub)
+lemna.sub.grp.DAS_decimal <- groupedData(Area ~ DAS_decimal | acn, data = lemna.sub)
+```
+
+```{r nls fpl}
+ctrl <- nls.control(maxiter = 1000, warnOnly = T)
+fm1.nls.fpl <- nls(Area ~ SSfpl(DAS_decimal, A, B, xmid, scal), data = lemna.sub, control = ctrl)
+plot(fm1.nls.fpl)
+```
+```{r nls pow}
+fm1.nls.pow <- nls(Area ~ SSpower(DAS_decimal, a, b ,c), data = lemna.sub, control = ctrl)
+plot(fm1.nls.pow)
+```
+```{r nlsList}
+fm.lis.pow <- nlsList(Area ~ SSpower(DAS_decimal, a, b, c) | acn,
+                         data = lemna.sub,
+                         control = ctrl)
+
+fm.lis.fpl <- nlsList(Area ~ SSfpl(DAS_decimal, A, B, xmid, scal) | acn,
+                      data = lemna.sub,
+                      control = ctrl)
+```
+```{r nlme}
+ctrl <- nlmeControl(msMaxIter = 1000, maxIter = 1000, opt = 'nlminb')
+fm.nlme.pow.1 <- nlme(fm.lis.pow,
+                      groups = ~ acn,
+                      control = ctrl,
+                      verbose = T)
+
+fm.nlme.fpl.1 <- nlme(fm.lis.fpl,
+                      groups = ~ acn,
+                      control = ctrl,
+                      verbose = T)
+anova(fm.nlme.pow.1, fm.nlme.fpl.1)
+```
+```{r fixed effects}
+
+
+fm.nlme.pow.1.FE <- fixef(fm.nlme.pow.1)
+fm.nlme.fpl.1.FE <- fixef(fm.nlme.fpl.1)
+n.acn <- length(unique(lemna.sub.grp$acn)) - 1
+n.temp <- length(unique(lemna.sub.grp$temperature)) - 1
+n.experiment <- length(unique(lemna.sub.grp$experiment)) - 1
+n <- n.acn + n.temp + n.acn * n.temp
+
+fm.start.pow.1 <- c(fm.nlme.pow.1.FE[1], rep(0, n), fm.nlme.pow.1.FE[2], rep(0, n), fm.nlme.pow.1.FE[3],rep(0, n.acn + n.temp))
+
+fm.start.fpl.1 <- c(fm.nlme.fpl.1.FE[1], rep(0, n), fm.nlme.fpl.1.FE[2], rep(0, n), fm.nlme.fpl.1.FE[3], rep(0, n), fm.nlme.fpl.1.FE[4], rep(0, n))
+
+fm.nlme.pow.2 <- update(fm.nlme.pow.1,
+                        fixed = list(a + b ~ acn * temperature, c ~ acn + temperature),
+                        start = fm.start,
+                        control = ctrl)
+
+
+
+fm.nlme.fpl.2 <- update(fm.nlme.fpl.1,
+                        fixed = list(A + B + xmid + scal ~ acn * temperature),
+                        start = fm.start.fpl.1,
+                        control = ctrl)
+
+```
+
+
+
+## IDEAS
+split up per temperature
+use genoptye as grouping factor
+use ssfpl instead of power law
+
+first use nls to test significance
+
