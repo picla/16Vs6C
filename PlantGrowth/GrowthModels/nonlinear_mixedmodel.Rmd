@@ -214,6 +214,8 @@ Additionally the mnodel will be run with acn * experiment, to egt experiment spe
 
 ```{r final model}
 ctrl <- nlmeControl(msMaxIter = 1000, maxIter = 1000, opt = 'nlminb')
+
+
 # run nlsList for starting
 fm.lis <- nlsList(Area ~ SSpower(DAS, a, b, c),
                          data = lemna.sub.grp.DAS,
@@ -270,6 +272,10 @@ fm.nlme.6 <- update(fm.nlme.2,
                     random = a ~ experiment,
                     control = ctrl,
                     verbose = T)
+
+
+
+
 
 
 ```
