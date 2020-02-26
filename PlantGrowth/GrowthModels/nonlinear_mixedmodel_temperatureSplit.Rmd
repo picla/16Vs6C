@@ -1,0 +1,220 @@
+---
+title: "nonlinear_mixedmodel_temperatureSplit"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(tidyverse)
+library(nlme)
+library(ggpubr)
+knitr::opts_knit$set(root.dir = "/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/")
+```
+
+
+```{r data}
+lemna <- read_delim('Data/Growth/rawdata_combined_annotation_NO.txt', delim = '\t')
+```
+```{r function}
+# self-starting nonlinear power law function in R
+# Written by C. Scherber, 4th December 2013
+# http://www.christoph-scherber.de/self-starting%20power%20law%20function.txt
+
+# Please acknowledge me should you use this function in publications.
+# note that response and explanatory variables need to be strictly positive.
+
+powermodel=function(x,a,b,c)
+{a+b*x^c}
+
+powermodelInit=function(mCall,LHS,data){
+    xy=sortedXyData(mCall[["x"]],LHS,data)
+    lmFit1=lm(xy[,"y"]~1) #for "intercept", a
+    lmFit2=lm(log(xy[,"y"])~log(xy[,"x"])) #for b and c
+    coefs1=coef(lmFit1)
+    coefs2=coef(lmFit2)
+    a=coefs1
+    b=exp(coefs2[1])
+    c=coefs2[2]
+    value=c(a,b,c)
+    names(value)=mCall[c("a","b","c")]
+    value
+}
+
+SSpower=selfStart(powermodel,powermodelInit,c("a","b","c"))
+
+```
+```{r data preparation}
+lemna$ID <- paste(lemna$pot, lemna$experiment, sep = '_')
+lemna$acn <- as.character(lemna$acn)
+lemna$Area[lemna$Area == 0] <- NA
+
+# only use accessions which have data for all replicates
+acns_rep1 <- unique(lemna$acn[lemna$replicate == 'rep1'])
+acns_rep2 <- unique(lemna$acn[lemna$replicate == 'rep2'])
+acns_rep3 <- unique(lemna$acn[lemna$replicate == 'rep3'])
+
+acns_rep123 <- intersect(intersect(acns_rep2, acns_rep3), acns_rep1)
+lemna <- lemna[lemna$acn %in% acns_rep123, ]
+```
+
+```{r subset}
+acns.nr <- 249
+rep.nr <- 3
+temp.nr <- 2
+
+lemna.sub <- lemna %>%
+  filter(acn %in% unique(lemna$acn)[1:acns.nr], replicate %in% unique(lemna$replicate)[1:rep.nr], temperature %in% unique(lemna$temperature)[1:temp.nr]) %>%
+  drop_na(Area) %>%
+  select(ID, acn, experiment, temperature, replicate, DAS_decimal, Area) %>%
+  mutate(DAS = round(DAS_decimal),
+         ID = as.factor(ID),
+         acn = as.factor(acn),
+         temperature = as.factor(temperature),
+         replicate = as.factor(replicate),
+         experiment = as.factor(experiment))
+
+lemna.sub.split <- lemna.sub %>%
+  group_split(temperature, replicate)
+```
+
+```{r nls}
+ctrl <- nls.control(maxiter = 1000, warnOnly = T)
+# power function
+fm1.nls.pow.16 <- nls(Area ~ SSpower(DAS_decimal, a, b ,c), data = lemna.sub.split[[1]], control = ctrl)
+fm1.nls.pow.6 <- nls(Area ~ SSpower(DAS_decimal, a, b ,c), data = lemna.sub.split[[2]], control = ctrl)
+
+#fpl
+fm1.nls.fpl.16 <- nls(Area ~ SSfpl(DAS_decimal, A, B, xmid, scal), data = lemna.sub.split[[1]], control = ctrl)
+fm1.nls.fpl.6 <- nls(Area ~ SSfpl(DAS_decimal, A, B, xmid, scal), data = lemna.sub.split[[2]], control = ctrl)
+
+
+p.pow.16 <- plot(fm1.nls.pow.16, main = 'fm1.nls.pow.16')
+p.pow.6 <- plot(fm1.nls.pow.6, main = 'fm1.nls.pow.6')
+p.fpl.16 <- plot(fm1.nls.fpl.16, main = 'fm1.nls.fpl.16')
+p.fpl.6 <- plot(fm1.nls.fpl.6, main = 'fm1.nls.fpl.6')
+ggarrange(p.pow.16, p.pow.6, p.fpl.16, p.fpl.6)
+```
+
+```{r nlsList}
+# power function
+fm.lis.pow.16 <- nlsList(Area ~ SSpower(DAS, a, b, c) | acn,
+                         data = lemna.sub.split[[1]],
+                         control = ctrl)
+
+fm.lis.pow.6 <- nlsList(Area ~ SSpower(DAS, a, b, c) | acn,
+                         data = lemna.sub.split[[2]],
+                         control = ctrl)
+# fpl
+fm.lis.fpl.16 <- nlsList(Area ~ SSfpl(DAS, A, B, xmid, scal) | acn,
+                      data = lemna.sub.split[[1]],
+                      control = ctrl)
+
+fm.lis.fpl.6 <- nlsList(Area ~ SSfpl(DAS, A, B, xmid, scal) | acn,
+                      data = lemna.sub.split[[2]],
+                      control = ctrl)
+
+# plot
+p.pow.16 <- plot(fm.lis.pow.16, main = 'fm.lis.pow.16')
+p.pow.6 <- plot(fm.lis.pow.6, main = 'fm.lis.pow.6')
+p.fpl.16 <- plot(fm.lis.fpl.16, main = 'fm.lis.fpl.16')
+p.fpl.6 <- plot(fm.lis.fpl.6, main = 'fm.lis.fpl.6')
+ggarrange(p.pow.16, p.pow.6, p.fpl.16, p.fpl.6)
+```
+
+```{r nlme}
+ctrl <- nlmeControl(msMaxIter = 1000, maxIter = 1000, opt = 'nlminb')
+
+fm1.nlme.pow.16 <- nlme(fm.lis.pow.16,
+                      groups = ~ acn,
+                      control = ctrl,
+                      verbose = T)
+
+fm1.nlme.pow.6 <- nlme(fm.lis.pow.6,
+                      groups = ~ acn,
+                      control = ctrl,
+                      verbose = T)
+
+
+fm1.nlme.fpl.16 <- nlme(fm.lis.fpl.16,
+                      groups = ~ acn,
+                      control = ctrl,
+                      verbose = T)
+
+fm1.nlme.fpl.6 <- nlme(fm.lis.fpl.6,
+                      groups = ~ acn,
+                      control = ctrl,
+                      verbose = T)
+
+```
+
+```{r fit per experiment}
+ctrl.nls <- nls.control(maxiter = 1000, warnOnly = T)
+ctrl.nlme <- nlmeControl(maxIter = 5000, msMaxIter = 1000)
+
+model.nlme.pow <- function(data)
+{
+  fit.lis <- nlsList(Area ~ SSpower(DAS, a, b, c) | acn,
+                         data = data,
+                         control = ctrl.nls)
+  fit.nlme <- nlme(fit.lis,
+              control = ctrl.nlme,
+              data = data,
+              verbose = T)
+  return(fit.nlme)
+}
+
+fit.nlme.pow <- lapply(lemna.sub.split, model.nlme.pow)
+
+# 1 does converge - 16C rep1
+fit.nlme.pow.1 <- model.nlme.pow(lemna.sub.split[[1]])
+# 2 does converge - 16C rep2
+fit.nlme.pow.2 <- model.nlme.pow(lemna.sub.split[[2]])
+# 3 does converge - 16C rep3
+fit.nlme.pow.3 <- model.nlme.pow(lemna.sub.split[[3]])
+# 4 does not converge - 6C rep1
+fit.nlme.pow.4 <- model.nlme.pow(lemna.sub.split[[4]])
+# 5 does converge - 6C rep2 (50 iterations)
+fit.nlme.pow.5 <- model.nlme.pow(lemna.sub.split[[5]])
+# 5 does  converge - 6C rep3 (10 iterations)
+fit.nlme.pow.6 <- model.nlme.pow(lemna.sub.split[[6]])
+```
+
+
+```{r 6C does not converge}
+p.rep1 <- ggplot(data = lemna.sub.split[[4]], aes(x = DAS_decimal, y = Area)) +
+  geom_line(aes(group = ID, col = acn)) + 
+  ggtitle('6C_rep1') +
+  theme(legend.position = 'none')
+
+p.rep2 <- ggplot(data = lemna.sub.split[[5]], aes(x = DAS_decimal, y = Area)) +
+  geom_line(aes(group = ID, col = acn)) +
+  ggtitle('6C_rep2') +
+  theme(legend.position = 'none')
+
+p.rep3 <- ggplot(data = lemna.sub.split[[6]], aes(x = DAS_decimal, y = Area)) +
+  geom_line(aes(group = ID, col = acn)) +
+  ggtitle('6C_rep3') +
+  theme(legend.position = 'none')
+
+ggarrange(p.rep1, p.rep2, p.rep3)
+```
+
+```{r get the fixed effects right}
+# fixed effect with accession
+
+# anova
+
+# check coefficients for random effects
+
+
+
+
+
+```
+
+```{r get structure right for combining replicates}
+
+```
+
+
