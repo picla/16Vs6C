@@ -150,7 +150,7 @@ fm1.nlme.fpl.6 <- nlme(fm.lis.fpl.6,
 
 ```{r fit per experiment}
 ctrl.nls <- nls.control(maxiter = 1000, warnOnly = T)
-ctrl.nlme <- nlmeControl(maxIter = 5000, msMaxIter = 1000)
+ctrl.nlme <- nlmeControl(maxIter = 5000, msMaxIter = 100000, opt = 'nlminb')
 
 model.nlme.pow <- function(data)
 {
@@ -166,18 +166,31 @@ model.nlme.pow <- function(data)
 
 fit.nlme.pow <- lapply(lemna.sub.split, model.nlme.pow)
 
-# 1 does converge - 16C rep1
+# 1 does not converge - 16C rep1
 fit.nlme.pow.1 <- model.nlme.pow(lemna.sub.split[[1]])
+# due to highly unbalanced data over time?
+# take only DAS 16:30
+
 # 2 does converge - 16C rep2
 fit.nlme.pow.2 <- model.nlme.pow(lemna.sub.split[[2]])
+save(fit.nlme.pow.2, file = 'Data/Growth/fit.nlme.pow.2.rda')
+load('Data/Growth/fit.nlme.pow.2.rda')
 # 3 does converge - 16C rep3
 fit.nlme.pow.3 <- model.nlme.pow(lemna.sub.split[[3]])
+save(fit.nlme.pow.3, file = 'Data/Growth/fit.nlme.pow.3.rda')
+load('Data/Growth/fit.nlme.pow.3.rda')
 # 4 does not converge - 6C rep1
+# did converge on cluster (R version 3.6.2) with 16 cores
 fit.nlme.pow.4 <- model.nlme.pow(lemna.sub.split[[4]])
+load('Data/Growth/fit.nlme.pow.4.rda')
 # 5 does converge - 6C rep2 (50 iterations)
 fit.nlme.pow.5 <- model.nlme.pow(lemna.sub.split[[5]])
-# 5 does  converge - 6C rep3 (10 iterations)
+save(fit.nlme.pow.5, file = 'Data/Growth/fit.nlme.pow.5.rda')
+load('Data/Growth/fit.nlme.pow.5.rda')
+# 6 does  converge - 6C rep3 (10 iterations)
 fit.nlme.pow.6 <- model.nlme.pow(lemna.sub.split[[6]])
+save(fit.nlme.pow.6, file = 'Data/Growth/fit.nlme.pow.6.rda')
+load('Data/Growth/fit.nlme.pow.6.rda')
 ```
 
 
@@ -202,7 +215,14 @@ ggarrange(p.rep1, p.rep2, p.rep3)
 
 ```{r get the fixed effects right}
 # fixed effect with accession
-
+fit.nlme.pow.6.FE <- fixef(fit.nlme.pow.6)
+n.acn <- length(unique(lemna.sub.split[[6]]$acn)) - 1 
+start.6 = c(fit.nlme.pow.6.FE[1], rep(0, n.acn), fit.nlme.pow.6.FE[2], rep(0, n.acn), fit.nlme.pow.6.FE[3], rep(0, n.acn)) 
+fit2.nlme.pow.6 <- update(fit.nlme.pow.6,
+                          data = lemna.sub.split[[6]],
+                          fixed = list(a + b + c ~ acn),
+                          start = start.6,
+                          verbose = T)
 # anova
 
 # check coefficients for random effects
