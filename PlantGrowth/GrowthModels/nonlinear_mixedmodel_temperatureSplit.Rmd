@@ -43,6 +43,24 @@ powermodelInit=function(mCall,LHS,data){
 
 SSpower=selfStart(powermodel,powermodelInit,c("a","b","c"))
 
+
+## self start function from ecology paper
+# Self-start function for power-law fit. This self-start for this model is not provided by Pinhero and Bates (2000), so I wrote one. Unfortunately, it often does not lead to convergence. Any suggestions would be welcome
+fmla.pow <- as.formula("~(M0^(1-beta) + r*x*(1-beta))^(1/(1-beta))")
+Init.pow <- function(mCall, LHS, data){
+    xy <- sortedXyData(mCall[["x"]], LHS, data)
+    if(nrow(xy) < 4) {stop("Too few distinct x values to fit a power-law")}
+	r    <-coef(lm(log(y) ~ x, xy))[2]    # Use the slope from a log fit to the data as an initial guess for r
+	M0   <- min(xy$y)		              # Use the minimum y value as an initial guess for M0
+	beta <- 0.9	                          # give initial guess of beta as 0.9. don't use beta = 1, as it's undefined (1/0)
+    value <- c(M0, r, beta) 
+    names(value) <- mCall[c("M0", "r", "beta")]
+ 	return(value)
+	}
+SS.pow  <- selfStart(fmla.pow, initial = Init.pow, parameters = c("M0", "r", "beta"))
+
+
+
 ```
 ```{r data preparation}
 lemna$ID <- paste(lemna$pot, lemna$experiment, sep = '_')
@@ -148,7 +166,7 @@ fm1.nlme.fpl.6 <- nlme(fm.lis.fpl.6,
 
 ```
 
-```{r fit per experiment}
+```{r fit per experiment - power function 1}
 ctrl.nls <- nls.control(maxiter = 1000, warnOnly = T)
 ctrl.nlme <- nlmeControl(maxIter = 5000, msMaxIter = 100000, opt = 'nlminb')
 
@@ -192,26 +210,100 @@ fit.nlme.pow.6 <- model.nlme.pow(lemna.sub.split[[6]])
 save(fit.nlme.pow.6, file = 'Data/Growth/fit.nlme.pow.6.rda')
 load('Data/Growth/fit.nlme.pow.6.rda')
 ```
+```{r fit per experiment - power function eco}
+ctrl.nls <- nls.control(maxiter = 1000, warnOnly = T)
+ctrl.nlme <- nlmeControl(maxIter = 5000, msMaxIter = 100000, opt = 'nlminb')
 
+model.nlme.poweco <- function(data)
+{
+  fit.lis <- nlsList(Area ~ SS.pow(DAS_decimal, M0, r, beta) | acn,
+                         data = data,
+                         control = ctrl.nls)
+  fit.nlme <- nlme(fit.lis,
+              control = ctrl.nlme,
+              data = data,
+              verbose = T)
+  return(fit.nlme)
+}
 
-```{r 6C does not converge}
-p.rep1 <- ggplot(data = lemna.sub.split[[4]], aes(x = DAS_decimal, y = Area)) +
-  geom_line(aes(group = ID, col = acn)) + 
-  ggtitle('6C_rep1') +
-  theme(legend.position = 'none')
+# convergence improves when using DAS_decimal instead of DAS
 
-p.rep2 <- ggplot(data = lemna.sub.split[[5]], aes(x = DAS_decimal, y = Area)) +
-  geom_line(aes(group = ID, col = acn)) +
-  ggtitle('6C_rep2') +
-  theme(legend.position = 'none')
+# 1 - 16C_rep1
+fit.nlme.poweco.1 <- model.nlme.poweco(lemna.sub.split[[1]])
 
-p.rep3 <- ggplot(data = lemna.sub.split[[6]], aes(x = DAS_decimal, y = Area)) +
-  geom_line(aes(group = ID, col = acn)) +
-  ggtitle('6C_rep3') +
-  theme(legend.position = 'none')
-
-ggarrange(p.rep1, p.rep2, p.rep3)
+# 2 no convergence - 16C rep2
+fit.nlme.poweco.2 <- model.nlme.poweco(lemna.sub.split[[2]])
+save(fit.nlme.poweco.2, file = 'Data/Growth/fit.nlme.poweco.2.rda')
+load('Data/Growth/fit.nlme.poweco.2.rda')
+# 3  no convergence - 16C rep3
+fit.nlme.poweco.3 <- model.nlme.poweco(lemna.sub.split[[3]])
+save(fit.nlme.poweco.3, file = 'Data/Growth/fit.nlme.poweco.3.rda')
+load('Data/Growth/fit.nlme.poweco.3.rda')
+# 4  convergence - 6C rep1
+fit.nlme.poweco.4 <- model.nlme.poweco(lemna.sub.split[[4]])
+save(fit.nlme.poweco.4, file = 'Data/Growth/fit.nlme.poweco.4.rda')
+load('Data/Growth/fit.nlme.poweco.4.rda')
+# 5 convergence - 6C rep2 
+fit.nlme.poweco.5 <- model.nlme.poweco(lemna.sub.split[[5]])
+save(fit.nlme.poweco.5, file = 'Data/Growth/fit.nlme.poweco.5.rda')
+load('Data/Growth/fit.nlme.poweco.5.rda')
+# 6 convergence - 6C rep3 
+fit.nlme.poweco.6 <- model.nlme.poweco(lemna.sub.split[[6]])
+save(fit.nlme.poweco.6, file = 'Data/Growth/fit.nlme.poweco.6.rda')
+load('Data/Growth/fit.nlme.poweco.6.rda')
 ```
+
+```{r fit per experiment - logis}
+ctrl.nls <- nls.control(maxiter = 1000, warnOnly = T)
+ctrl.nlme <- nlmeControl(maxIter = 5000, msMaxIter = 100000, opt = 'nlminb')
+
+model.nlme.logis <- function(data)
+{
+  fit.lis <- nlsList(Area ~ SSlogis(DAS_decimal, Asym, xmid, scal) | acn,
+                         data = data,
+                         control = ctrl.nls)
+  fit.nlme <- nlme(fit.lis,
+              control = ctrl.nlme,
+              data = data,
+              verbose = T)
+  return(fit.nlme)
+}
+
+# convergence improves when using DAS_decimal instead of DAS
+
+# 1 - 16C_rep1
+fit.nlme.logis.1 <- model.nlme.logis(lemna.sub.split[[1]])
+
+# 2 convergence - 16C rep2 (104 iterations)
+fit.nlme.logis.2 <- model.nlme.logis(lemna.sub.split[[2]])
+save(fit.nlme.logis.2, file = 'Data/Growth/fit.nlme.logis.2.rda')
+load('Data/Growth/fit.nlme.logis.2.rda')
+# 3 convergence - 16C rep3 (16 iterations)
+fit.nlme.logis.3 <- model.nlme.logis(lemna.sub.split[[3]])
+save(fit.nlme.logis.3, file = 'Data/Growth/fit.nlme.logis.3.rda')
+load('Data/Growth/fit.nlme.logis.3.rda')
+# 4  1convergence - 6C rep1
+fit.nlme.logis.4 <- model.nlme.logis(lemna.sub.split[[4]])
+save(fit.nlme.logis.4, file = 'Data/Growth/fit.nlme.logis.4.rda')
+load('Data/Growth/fit.nlme.logis.4.rda')
+# 5 converged - 6C rep2 
+fit.nlme.logis.5 <- model.nlme.logis(lemna.sub.split[[5]])
+save(fit.nlme.logis.5, file = 'Data/Growth/fit.nlme.logis.5.rda')
+load('Data/Growth/fit.nlme.logis.5.rda')
+# 6 converged - 6C rep3 
+fit.nlme.logis.6 <- model.nlme.logis(lemna.sub.split[[6]])
+save(fit.nlme.logis.6, file = 'Data/Growth/fit.nlme.logis.6.rda')
+load('Data/Growth/fit.nlme.logis.6.rda')
+```
+
+```{r per temperature power function eco}
+lemna.sub.6C <- rbind(lemna.sub.split[[1]], lemna.sub.split[[2]], lemna.sub.split[[3]])
+
+
+fit.nlme.poweco.6C <- model.nlme.poweco(lemna.sub.6C)
+```
+
+
 
 ```{r get the fixed effects right}
 # fixed effect with accession
