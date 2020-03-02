@@ -172,7 +172,7 @@ ctrl.nlme <- nlmeControl(maxIter = 5000, msMaxIter = 100000, opt = 'nlminb')
 
 model.nlme.pow <- function(data)
 {
-  fit.lis <- nlsList(Area ~ SSpower(DAS, a, b, c) | acn,
+  fit.lis <- nlsList(Area ~ SSpower(DAS_decimal, a, b, c) | ID,
                          data = data,
                          control = ctrl.nls)
   fit.nlme <- nlme(fit.lis,
@@ -199,9 +199,10 @@ save(fit.nlme.pow.3, file = 'Data/Growth/fit.nlme.pow.3.rda')
 load('Data/Growth/fit.nlme.pow.3.rda')
 # 4 does not converge - 6C rep1
 # did converge on cluster (R version 3.6.2) with 16 cores
+# converges with ID as grouping
 fit.nlme.pow.4 <- model.nlme.pow(lemna.sub.split[[4]])
 load('Data/Growth/fit.nlme.pow.4.rda')
-# 5 does converge - 6C rep2 (50 iterations)
+# 5 does converge - 6C rep2 (50 iterations) with acn as grouping
 fit.nlme.pow.5 <- model.nlme.pow(lemna.sub.split[[5]])
 save(fit.nlme.pow.5, file = 'Data/Growth/fit.nlme.pow.5.rda')
 load('Data/Growth/fit.nlme.pow.5.rda')
@@ -216,7 +217,7 @@ ctrl.nlme <- nlmeControl(maxIter = 5000, msMaxIter = 100000, opt = 'nlminb')
 
 model.nlme.poweco <- function(data)
 {
-  fit.lis <- nlsList(Area ~ SS.pow(DAS_decimal, M0, r, beta) | acn,
+  fit.lis <- nlsList(Area ~ SS.pow(DAS_decimal, M0, r, beta) | ID,
                          data = data,
                          control = ctrl.nls)
   fit.nlme <- nlme(fit.lis,
@@ -228,7 +229,7 @@ model.nlme.poweco <- function(data)
 
 # convergence improves when using DAS_decimal instead of DAS
 
-# 1 - 16C_rep1
+# 1 no convergence - 16C_rep1
 fit.nlme.poweco.1 <- model.nlme.poweco(lemna.sub.split[[1]])
 
 # 2 no convergence - 16C rep2
@@ -239,7 +240,7 @@ load('Data/Growth/fit.nlme.poweco.2.rda')
 fit.nlme.poweco.3 <- model.nlme.poweco(lemna.sub.split[[3]])
 save(fit.nlme.poweco.3, file = 'Data/Growth/fit.nlme.poweco.3.rda')
 load('Data/Growth/fit.nlme.poweco.3.rda')
-# 4  convergence - 6C rep1
+# 4 no convergence - 6C rep1 (only converges with acn as grouping)
 fit.nlme.poweco.4 <- model.nlme.poweco(lemna.sub.split[[4]])
 save(fit.nlme.poweco.4, file = 'Data/Growth/fit.nlme.poweco.4.rda')
 load('Data/Growth/fit.nlme.poweco.4.rda')
@@ -259,7 +260,7 @@ ctrl.nlme <- nlmeControl(maxIter = 5000, msMaxIter = 100000, opt = 'nlminb')
 
 model.nlme.logis <- function(data)
 {
-  fit.lis <- nlsList(Area ~ SSlogis(DAS_decimal, Asym, xmid, scal) | acn,
+  fit.lis <- nlsList(Area ~ SSlogis(DAS_decimal, Asym, xmid, scal) | ID,
                          data = data,
                          control = ctrl.nls)
   fit.nlme <- nlme(fit.lis,
@@ -271,36 +272,109 @@ model.nlme.logis <- function(data)
 
 # convergence improves when using DAS_decimal instead of DAS
 
-# 1 - 16C_rep1
+# 1 convergence - 16C_rep1
 fit.nlme.logis.1 <- model.nlme.logis(lemna.sub.split[[1]])
-
-# 2 convergence - 16C rep2 (104 iterations)
+# take only completee data (DAS 16: 30)
+# convergenc e(with DAS_decimal and ID as grouping)
+lemna.sub.16C_rep1.sub <- filter(lemna.sub.split[[1]], DAS %in% c(16:30))
+fit.nlme.logis.1.sub <- model.nlme.logis(lemna.sub.16C_rep1.sub)
+# 2 convergence - 16C rep2 (104 iterations) with acn as grouping
 fit.nlme.logis.2 <- model.nlme.logis(lemna.sub.split[[2]])
 save(fit.nlme.logis.2, file = 'Data/Growth/fit.nlme.logis.2.rda')
 load('Data/Growth/fit.nlme.logis.2.rda')
-# 3 convergence - 16C rep3 (16 iterations)
+# 3 convergence - 16C rep3 (16 iterations) with acn as grouping
 fit.nlme.logis.3 <- model.nlme.logis(lemna.sub.split[[3]])
 save(fit.nlme.logis.3, file = 'Data/Growth/fit.nlme.logis.3.rda')
 load('Data/Growth/fit.nlme.logis.3.rda')
-# 4  1convergence - 6C rep1
+# 4 no convergence  - 6C rep1
 fit.nlme.logis.4 <- model.nlme.logis(lemna.sub.split[[4]])
 save(fit.nlme.logis.4, file = 'Data/Growth/fit.nlme.logis.4.rda')
 load('Data/Growth/fit.nlme.logis.4.rda')
-# 5 converged - 6C rep2 
+# 5 no convergence - 6C rep2 
 fit.nlme.logis.5 <- model.nlme.logis(lemna.sub.split[[5]])
 save(fit.nlme.logis.5, file = 'Data/Growth/fit.nlme.logis.5.rda')
 load('Data/Growth/fit.nlme.logis.5.rda')
-# 6 converged - 6C rep3 
+# 6 convergence - 6C rep3 
 fit.nlme.logis.6 <- model.nlme.logis(lemna.sub.split[[6]])
 save(fit.nlme.logis.6, file = 'Data/Growth/fit.nlme.logis.6.rda')
 load('Data/Growth/fit.nlme.logis.6.rda')
+```
+```{r fit per experiment - fpl}
+ctrl.nls <- nls.control(maxiter = 1000, warnOnly = T)
+ctrl.nlme <- nlmeControl(maxIter = 5000, msMaxIter = 100000, opt = 'nlminb')
+
+model.nlme.fpl <- function(data)
+{
+  fit.lis <- nlsList(Area ~ SSfpl(DAS, A, B, xmid, scal) | acn,
+                         data = data,
+                         control = ctrl.nls)
+  fit.nlme <- nlme(fit.lis,
+              control = ctrl.nlme,
+              data = data,
+              verbose = T)
+  return(fit.nlme)
+}
+
+# convergence improves when using DAS_decimal instead of DAS?
+
+# 1 - 16C_rep1
+fit.nlme.fpl.1 <- model.nlme.fpl(lemna.sub.split[[1]])
+
+# 2 no convergence - 16C rep2 
+fit.nlme.fpl.2 <- model.nlme.fpl(lemna.sub.split[[2]])
+save(fit.nlme.fpl.2, file = 'Data/Growth/fit.nlme.fpl.2.rda')
+load('Data/Growth/fit.nlme.fpl.2.rda')
+# 3  - 16C rep3
+fit.nlme.fpl.3 <- model.nlme.fpl(lemna.sub.split[[3]])
+save(fit.nlme.fpl.3, file = 'Data/Growth/fit.nlme.fpl.3.rda')
+load('Data/Growth/fit.nlme.fpl.3.rda')
+# 4   - 6C rep1
+fit.nlme.fpl.4 <- model.nlme.fpl(lemna.sub.split[[4]])
+save(fit.nlme.fpl.4, file = 'Data/Growth/fit.nlme.fpl.4.rda')
+load('Data/Growth/fit.nlme.fpl.4.rda')
+# 5  - 6C rep2 
+fit.nlme.fpl.5 <- model.nlme.fpl(lemna.sub.split[[5]])
+save(fit.nlme.fpl.5, file = 'Data/Growth/fit.nlme.fpl.5.rda')
+load('Data/Growth/fit.nlme.fpl.5.rda')
+# 6  - 6C rep3 
+fit.nlme.fpl.6 <- model.nlme.fpl(lemna.sub.split[[6]])
+save(fit.nlme.fpl.6, file = 'Data/Growth/fit.nlme.fpl.6.rda')
+load('Data/Growth/fit.nlme.fpl.6.rda')
 ```
 
 ```{r per temperature power function eco}
 lemna.sub.6C <- rbind(lemna.sub.split[[1]], lemna.sub.split[[2]], lemna.sub.split[[3]])
 
+model.nlme.test <- function(data)
+{
+  fit.lis <- nlsList(Area ~ SS.pow(DAS, M0, r, beta) | ID,
+                         data = data,
+                         control = ctrl.nls)
+  fit.nlme <- nlme(fit.lis,
+              control = ctrl.nlme,
+              data = data,
+              verbose = T)
+  return(fit.nlme)
+}
 
-fit.nlme.poweco.6C <- model.nlme.poweco(lemna.sub.6C)
+# model only runs when rep1 is excluded.
+# What is so different about rep1 -> more or less outliers removed? check variances and means per accessino/ID.s
+# also works with grouping by acn?
+# replicate is random effect
+
+
+fit.nlme.poweco.6C <- model.nlme.test(lemna.sub.6C)
+
+# fixed effects
+fit.nlme.poweco.6C.FE <- fixef(fit.nlme.poweco.6C)
+n.acn <- length(unique(lemna.sub.6C$acn)) - 1 
+start.6 = c(fit.nlme.poweco.6C.FE[1], rep(0, n.acn), fit.nlme.poweco.6C.FE[2], rep(0, n.acn), fit.nlme.poweco.6C.FE[3], rep(0, n.acn)) 
+
+fit2.nlme.poweco.6C <- update(fit.nlme.poweco.6C,
+                              data = lemna.sub.6C,
+                              fixed = list(M0 + r + beta ~ acn),
+                              start = start.6,
+                              control = ctrl.nlme)
 ```
 
 
