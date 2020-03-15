@@ -227,6 +227,7 @@ model.nlme.poweco <- function(data)
   return(fit.nlme)
 }
 
+
 # convergence improves when using DAS_decimal instead of DAS
 
 # 1 no convergence - 16C_rep1
@@ -253,6 +254,373 @@ fit.nlme.poweco.6 <- model.nlme.poweco(lemna.sub.split[[6]])
 save(fit.nlme.poweco.6, file = 'Data/Growth/fit.nlme.poweco.6.rda')
 load('Data/Growth/fit.nlme.poweco.6.rda')
 ```
+
+```{r 6C}
+ctrl.nls <- nls.control(maxiter = 1000, warnOnly = T)
+ctrl.nlme <- nlmeControl(maxIter = 5000, msMaxIter = 100000, opt = 'nlminb')
+lemna.6C <- rbind(lemna.sub.split[[4]], lemna.sub.split[[5]], lemna.sub.split[[6]])
+
+fit.lis.6C <- nlsList(Area ~ SS.pow(DAS_decimal, M0, r, beta) | acn,
+                     data = lemna.6C,
+                     control = ctrl.nls)
+
+n.acns <- length(unique(lemna.6C$acn)) -1
+start.6C <- c(fixef(fit.lis.6C)[1], rep(0, n.acns), fixef(fit.lis.6C)[2], rep(0, n.acns), fixef(fit.lis.6C)[3], rep(0, n.acns))
+
+# CONVERGES
+fit2.nlme.6C <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
+                    fixed = M0 + r + beta ~ 1,
+                    groups = ~ acn,
+                    start = fixef(fit.lis.6C),
+                    random = pdDiag(M0 ~ replicate),
+                    data = lemna.6C,
+                    control = ctrl.nlme,
+                    verbose = T)
+save(fit2.nlme.6C, file = '/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit2.nlme.6C.rda')
+
+start.6C <- c(fixef(fit2.nlme.6C)[1], rep(0, n.acns), fixef(fit2.nlme.6C)[2], rep(0, n.acns), fixef(fit2.nlme.6C)[3], rep(0, n.acns))
+# CONVERGES #
+fit3.nlme.6C <- update(fit2.nlme.6C,
+                    fixed = list(M0 ~ acn, r + beta ~ 1),
+                    groups = ~ acn,
+                    start = c(fixef(fit2.nlme.6C)[1], rep(0, n.acns), fixef(fit2.nlme.6C)[2], fixef(fit2.nlme.6C)[3]),
+                    random = pdDiag(list(M0 ~ replicate)),
+                    data = lemna.6C,
+                    control = ctrl.nlme,
+                    verbose = T)
+save(fit3.nlme.6C, file = '/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit3.nlme.6C.rda')
+# CONVERGES
+fit4.nlme.6C <- update(fit3.nlme.6C,
+                    fixed = list(M0 + r ~ acn, beta ~ 1),
+                    groups = ~ acn,
+                    start = c(fixef(fit3.nlme.6C)[1:249], fixef(fit3.nlme.6C)[250], rep(0, n.acns), fixef(fit3.nlme.6C)[251]),
+                    random = pdDiag(list(M0 ~ replicate)),
+                    data = lemna.6C,
+                    control = ctrl.nlme,
+                    verbose = T)
+save(fit4.nlme.6C, file = '/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit4.nlme.6C.rda')
+# THE MODEL
+fit5.nlme.6C <- update(fit4.nlme.6C,
+                    fixed = list(M0 + r ~ acn, beta ~ 1),
+                    groups = ~ ID,
+                    start = fixef(fit4.nlme.6C),
+                    random = pdDiag(list(M0 ~ replicate)),
+                    correlation = corCAR1(form =  ~ DAS_decimal),
+                    data = lemna.6C,
+                    control = ctrl.nlme,
+                    verbose = T)
+save(fit5.nlme.6C, file = '/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit5.nlme.6C.rda')
+
+# extend random effects
+fit5b.nlme.6C <- update(fit5.nlme.6C,
+                    fixed = list(M0 + r ~ acn, beta ~ 1),
+                    groups = ~ ID,
+                    start = fixef(fit5.nlme.6C),
+                    random = pdBlocked(list(M0 ~ replicate, r ~ 1)),
+                    correlation = corCAR1(form =  ~ DAS_decimal),
+                    data = lemna.6C,
+                    control = ctrl.nlme,
+                    verbose = T)
+
+# NO CONVERGENCE
+fit7.nlme <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
+                    fixed = list(M0 + r ~ acn, beta ~ 1),
+                    groups = ~ ID,
+                    start = c(fixef(fit.lis.6C)[1], rep(0, n.acns), fixef(fit.lis.6C)[2], rep(0, n.acns), fixef(fit.lis.6C)[3]),
+                    random = pdDiag(list(M0 ~ replicate)),
+                    correlation = corCAR1(form =  ~ DAS_decimal),
+                    data = lemna.6C,
+                    control = ctrl.nlme,
+                    verbose = T)
+
+
+pdf('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/augPred_fit5_6C.pdf')
+for(acn in accessions)
+{
+  predData.a <- predData %>%
+    filter(acn == !!acn) %>%
+    mutate(DAS_decimal = DAS_decimal + 14)
+  
+  lemna.16C.a <- lemna.16C %>%
+    filter(acn == !!acn) %>%
+    mutate(DAS_decimal = DAS_decimal + 14)
+  
+  print(ggplot(predData.a, aes(DAS_decimal, fit2f)) +
+    geom_line() +
+    geom_point(data = lemna.16C.a, aes(DAS_decimal, Area, group = replicate)))
+}
+dev.off()
+
+
+# predict
+DAS_decimal_pred <- c(0:21)
+accessions <- unique(lemna.16C$acn)
+predData <- data.frame(
+  acn = rep(accessions, each = length(DAS_decimal_pred)),
+  DAS_decimal= rep(DAS_decimal_pred, length(accessions)))
+
+predData$fit2f <- predict(fit2f.nlme.16C, newdata = predData, level = 0)
+
+
+# plot raw data
+pdf('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/dataPlots/rawData_6C_perAcn.pdf')
+for (acn in unique(lemna.6C$acn))
+{
+  lemna.6C.a <- filter(lemna.6C, acn == !!acn)
+  p <- ggplot(lemna.6C.a, aes(DAS_decimal, Area, colour = replicate)) +
+    geom_line(aes(group = ID)) +
+    ggtitle(acn)
+  print(p)
+}
+dev.off()
+
+
+```
+```{r 16C}
+ctrl.nls <- nls.control(maxiter = 1000, warnOnly = T)
+ctrl.nlme <- nlmeControl(maxIter = 5000, msMaxIter = 100000, opt = 'nlminb')
+lemna.16C <- rbind(lemna.sub.split[[1]], lemna.sub.split[[2]], lemna.sub.split[[3]])
+lemna.16C <- lemna.16C[lemna.16C$DAS < 30, ]
+lemna.16C$DAS_decimal <- lemna.16C$DAS_decimal - 14
+n.acns <- length(unique(lemna.16C$acn)) - 1
+# remove outlier in accession 5865
+#lemna.16C <- lemna.16C[lemna.16C$ID != 'B.3_b6_16C_rep3', ]
+#lemna.16C <- lemna.16C[lemna.16C$ID != 'A.7_a1_16C_rep3', ]
+
+fit.lis.16C <- nlsList(Area ~ SS.pow(DAS_decimal, M0, r, beta) | acn,
+                     data = lemna.16C,
+                     control = ctrl.nls)
+fit.lis.16C.coef <- coef(fit.lis.16C)
+fit.lis.16C.coef[is.na(fit.lis.16C.coef)] <- 0
+
+# CONVERGENCE
+fit2.nlme.16C <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
+                    fixed = list(M0 ~ acn, r ~ 1, beta ~1),
+                    groups = ~ acn,
+                    start = c(fixef(fit.lis.16C)[1],fixef(fit.lis.16C)[2], fit.lis.16C.coef$r[-1], fixef(fit.lis.16C)[3]),
+                    random = pdBlocked(list(M0 ~ replicate, r ~ 1, beta ~1)),
+                    data = lemna.16C,
+                    control = ctrl.nlme,
+                    verbose = T)
+save(fit2.nlme.16C, file = '/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit2.nlme.16C.rda')
+
+# CONVERGES, better than fit2
+fit2b.nlme.16C <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
+                    fixed = list(M0 ~ acn, r ~ 1, beta ~1),
+                    groups = ~ acn,
+                    start = c(median(coef(fit.lis.16C)$M0, na.rm = T), rep(0, n.acns), median(coef(fit.lis.16C)$r, na.rm = T), median(coef(fit.lis.16C)$beta, na.rm = T)),
+                    random = pdBlocked(list(M0 ~ 1, r ~ 1, beta ~1)),
+                    data = lemna.16C,
+                    control = ctrl.nlme,
+                    verbose = T)
+save(fit2b.nlme.16C, file = '/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit2b.nlme.16C.rda')
+# CONVERGES, better model (anova)
+fit2c.nlme.16C <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
+                    fixed = list(M0 ~ acn, r ~ 1, beta ~1),
+                    groups = ~ acn,
+                    start = c(median(coef(fit.lis.16C)$M0, na.rm = T), rep(0, n.acns), median(coef(fit.lis.16C)$r, na.rm = T), median(coef(fit.lis.16C)$beta, na.rm = T)),
+                    random = pdBlocked(list(M0 ~ replicate, r ~ 1, beta ~1)),
+                    data = lemna.16C,
+                    control = ctrl.nlme,
+                    verbose = T)
+save(fit2c.nlme.16C, file = '/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit2c.nlme.16C.rda')
+# unclear whether it would converge, probabaly not
+fit2d.nlme.16C <- update(fit2c.nlme.16C,
+                    fixed = list(M0 ~ acn, r ~ 1, beta ~1),
+                    groups = ~ acn,
+                    start = c(median(coef(fit.lis.16C)$M0, na.rm = T), rep(0, n.acns), median(coef(fit.lis.16C)$r, na.rm = T), median(coef(fit.lis.16C)$beta, na.rm = T)),
+                    random = pdBlocked(list(M0 ~ replicate, r ~ replicate, beta ~1)),
+                    data = lemna.16C,
+                    control = ctrl.nlme,
+                    verbose = T)
+# CONVERGES!
+fit2e.nlme.16C <- update(fit2c.nlme.16C,
+                    fixed = list(M0 ~ acn, r ~ acn, beta ~1),
+                    groups = ~ acn,
+                    start = c(fixef(fit2c.nlme.16C)[1:249], fixef(fit2c.nlme.16C)[250], rep(0, n.acns), fixef(fit2c.nlme.16C)[251]),
+                    random = pdBlocked(list(M0 ~ replicate, r ~ 1, beta ~1)),
+                    data = lemna.16C,
+                    control = ctrl.nlme,
+                    verbose = T)
+save(fit2e.nlme.16C, file = '/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit2e.nlme.16C.rda')
+# CONVERGES
+fit2f.nlme.16C <- update(fit2e.nlme.16C,
+                    fixed = list(M0 ~ acn, r ~ acn, beta ~1),
+                    groups = ~ ID,
+                    start = fixef(fit2e.nlme.16C),
+                    random = pdBlocked(list(M0 ~ replicate, r ~ 1, beta ~1)),
+                    correlation = corCAR1(form = ~ DAS_decimal),
+                    data = lemna.16C,
+                    control = ctrl.nlme,
+                    verbose = T)
+save(fit2f.nlme.16C, file = '/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit2f.nlme.16C.rda')
+
+
+
+
+
+# use model estimates to extend model with extra timepoint
+lemna.16C <- rbind(lemna.sub.split[[1]], lemna.sub.split[[2]], lemna.sub.split[[3]])
+lemna.16C$DAS_decimal <- lemna.16C$DAS_decimal - 14
+
+# model does not converge with full dataset, probably to unbalanced between replicates (replicate one only has data until 30DAS)
+# visually, the model with the data until 30DAS sufficiently models also the data until 35DAS.
+fit2g.nlme.16C <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
+                    fixed = list(M0 ~ acn, r ~ 1, beta ~1),
+                    groups = ~ acn,
+                    start = c(fixef(fit2f.nlme.16C)[1:249], fixef(fit2f.nlme.16C)[250], fixef(fit2f.nlme.16C)[499]),
+                    random = pdBlocked(list(M0 ~ replicate, r ~ 1, beta ~1)),
+                    data = lemna.16C,
+                    control = ctrl.nlme,
+                    verbose = T)
+
+# plot to see if model on limited data is sufficient
+DAS_decimal_pred <- c(0:21)
+accessions <- unique(lemna.16C$acn)
+predData <- data.frame(
+  acn = rep(accessions, each = length(DAS_decimal_pred)),
+  DAS_decimal= rep(DAS_decimal_pred, length(accessions)))
+
+predData$fit2f <- predict(fit2f.nlme.16C, newdata = predData, level = 0)
+
+pdf('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/augPred_fit2f_16C.pdf')
+for(acn in accessions)
+{
+  predData.a <- predData %>%
+    filter(acn == !!acn) %>%
+    mutate(DAS_decimal = DAS_decimal + 14)
+  
+  lemna.16C.a <- lemna.16C %>%
+    filter(acn == !!acn) %>%
+    mutate(DAS_decimal = DAS_decimal + 14)
+  
+  print(ggplot(predData.a, aes(DAS_decimal, fit2f)) +
+    geom_line() +
+    geom_point(data = lemna.16C.a, aes(DAS_decimal, Area, group = replicate)))
+  
+}
+dev.off()
+
+
+
+
+
+fit3.nlme.16C <- update(fit2.nlme.16C,
+                    fixed = list(M0 ~ acn, r ~ 1, beta ~1),
+                    groups = ~ acn,
+                    start = c(fixef(fit2.nlme.16C)[1:249],fixef(fit2.nlme.16C)[250], fixef(fit2.nlme.16C)[251]),
+                    random = pdBlocked(list(M0 ~ replicate, r ~ replicate, beta ~1)),
+                    data = lemna.16C,
+                    control = ctrl.nlme,
+                    verbose = T)
+
+
+
+
+fit.lis.16C <- nlsList(Area ~ SSlogis(DAS_decimal, Asym, xmid, scal) | ID,
+                     data = lemna.16C,
+                     control = ctrl.nls)
+# CONVERGES
+fit.nlme.16C <- nlme(fit.lis.16C,
+                     control = ctrl.nlme,
+                     verbose = T)
+
+fit2.nlme.16C <- update(fit.nlme.16C,
+                        fixed = list(Asym ~ acn, xmid + scal ~ 1),
+                        groups = ~ acn,
+                        start = c(fixef(fit.nlme.16C)[1], rep(0, n.acns), fixef(fit.nlme.16C)[2], fixef(fit.nlme.16C)[3]),
+                        random = Asym ~ replicate,
+                        data = lemna.16C,
+                        control = ctrl.nlme,
+                        verbose = T)
+
+
+
+
+n.acns <- length(unique(lemna.16C$acn)) - 1
+fit2b.nlme.16C <- nlme(Area ~ SSlogis(DAS_decimal, Asym, xmid, scal),
+                       fixed = list(Asym ~ acn, xmid + scal ~ 1),
+                        groups = ~ acn,
+                        start = c(fixef(fit.lis.16C)[1], rep(0, n.acns), fixef(fit.lis.16C)[2], fixef(fit.lis.16C)[3]),
+                        random = Asym ~ replicate,
+                        data = lemna.16C,
+                        control = ctrl.nlme,
+                        verbose = T)
+
+fit3.nlme.16C <- update(fit2b.nlme.16C,
+                        fixed = list(Asym + scal ~ acn, xmid ~ 1),
+                        groups = ~ acn,
+                        start = c(fixef(fit2b.nlme.16C)[1:249], fixef(fit2b.nlme.16C)[250], rep(0, n.acns), fixef(fit2b.nlme.16C)[251]),
+                        random = Asym + scal ~ replicate,
+                        data = lemna.16C,
+                        control = ctrl.nlme,
+                        verbose = T)
+
+fit3.nlme.16C <- update(fit2.nlme.16C,
+                        fixed = list(Asym + xmid ~ acn, scal ~ 1),
+                        groups = ~ acn,
+                        start = c(fixef(fit2.nlme.16C)[1:249], fixef(fit2.nlme.16C)[250], rep(0, n.acns), fixef(fit2.nlme.16C)[251]),
+                        random = pdDiag(Asym + xmid ~ replicate),
+                        data = lemna.16C,
+                        control = ctrl.nlme,
+                        verbose = T)
+# GOMPERTZ
+fit.lis.gom.16C <- nlsList(Area ~ SSgompertz(DAS_decimal, Asym, b2, b3) | acn,
+                     data = lemna.16C,
+                     control = ctrl.nls)
+
+# CONVERGENCEs with acn as group, not ID]
+fit.nlme.gom.16C <- nlme(fit.lis.gom.16C,
+                     control = ctrl.nlme,
+                     verbose = T)
+
+n.acns <- length(unique(lemna.16C$acn)) - 1
+
+fit2.nlme.gom.16C <- update(fit.nlme.gom.16C,
+                        fixed = list(b2 ~ acn, Asym + b3 ~ 1),
+                        groups = ~ acn,
+                        start = c(fixef(fit.nlme.gom.16C)[1], fixef(fit.nlme.gom.16C)[2], rep(0, n.acns), fixef(fit.nlme.gom.16C)[3]),
+                        data = lemna.16C,
+                        control = ctrl.nlme,
+                        verbose = T)
+
+# plot
+fit.nlme.16C.predict <- predict(fit.nlme.gom.16C)
+pdf('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/dataPlots/rawData_16C_perAcn.pdf')
+for (acn in sort(unique(lemna.16C$acn)))
+{
+  lemna.16C.a <- filter(lemna.16C, acn == !!acn)
+  acn.emm <- fit.nlme.16C.predict[names(fit.nlme.16C.predict) == acn] 
+  p <- ggplot(lemna.16C.a, aes(DAS_decimal, Area, colour = replicate)) +
+    geom_line(aes(group = ID)) +
+    ggtitle(acn)
+  print(p)
+}
+dev.off()
+
+# NO CONVERGENCE
+fit2.nlme.16C <- nlme(Area ~ SSlogis(DAS_decimal, Asym, xmid, scal),
+                    fixed = Asym + xmid + scal ~ 1,
+                    groups = ~ acn,
+                    start = fixef(fit.lis.16C),
+                    random = pdDiag(scal ~ replicate),
+                    data = lemna.16C,
+                    control = ctrl.nlme,
+                    verbose = T)
+
+
+fit2b.nlme.16C <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
+                    fixed = M0 + r + beta ~ acn,
+                    groups = ~ acn,
+                    start = c(fixef(fit.lis.16C)[1], rep(0, n.acns), fixef(fit.lis.16C)[2], rep(0,n.acns), fixef(fit.lis.16C)[3], rep(0, n.acns)),
+                    random = pdBlocked(list(M0 ~ replicate, beta ~ 1, r ~ 1)),
+                    data = lemna.16C,
+                    control = ctrl.nlme,
+                    verbose = T)
+
+
+```
+
 
 ```{r fit per experiment - logis}
 ctrl.nls <- nls.control(maxiter = 1000, warnOnly = T)
