@@ -259,6 +259,7 @@ load('Data/Growth/fit.nlme.poweco.6.rda')
 ctrl.nls <- nls.control(maxiter = 1000, warnOnly = T)
 ctrl.nlme <- nlmeControl(maxIter = 5000, msMaxIter = 100000, opt = 'nlminb')
 lemna.6C <- rbind(lemna.sub.split[[4]], lemna.sub.split[[5]], lemna.sub.split[[6]])
+lemna.6C$DAS_decimal <- lemna.6C$DAS_decimal - 14
 
 fit.lis.6C <- nlsList(Area ~ SS.pow(DAS_decimal, M0, r, beta) | acn,
                      data = lemna.6C,
@@ -376,6 +377,65 @@ dev.off()
 
 
 ```
+```{r 6C updated after 16C}
+ctrl.nls <- nls.control(maxiter = 1000, warnOnly = T)
+ctrl.nlme <- nlmeControl(maxIter = 5000, msMaxIter = 100000, opt = 'nlminb')
+lemna.6C <- rbind(lemna.sub.split[[4]], lemna.sub.split[[5]], lemna.sub.split[[6]])
+
+lemna.6C$DAS_decimal <- lemna.6C$DAS_decimal - 14
+n.acns <- length(unique(lemna.6C$acn)) - 1
+
+fit.lis.6C <- nlsList(Area ~ SS.pow(DAS_decimal, M0, r, beta) | acn,
+                     data = lemna.6C,
+                     control = ctrl.nls)
+
+
+# CONVERGES
+fit2.nlme.6C <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
+                    fixed = list(M0 ~ 1, r ~ 1, beta ~1),
+                    groups = ~ acn,
+                    start = c(median(coef(fit.lis.6C)$M0), median(coef(fit.lis.6C)$r), median(coef(fit.lis.6C)$beta)),
+                    random = pdBlocked(list(M0 ~ 1, r ~ 1, beta ~ 1)),
+                    data = lemna.6C,
+                    control = ctrl.nlme,
+                    verbose = T)
+save(fit2.nlme.6C, file = '~/Documents/GMI/fit2.nlme.6C.rda')
+# CONVERGES
+fit2b.nlme.6C <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
+                    fixed = list(M0 ~ acn, r ~ 1, beta ~1),
+                    groups = ~ acn,
+                    start = c(fixef(fit2.nlme.6C)[1], rep(0, n.acns), fixef(fit2.nlme.6C)[2], fixef(fit2.nlme.6C)[3]),
+                    random = pdBlocked(list(M0 ~ 1, r ~ 1, beta ~1)),
+                    data = lemna.6C,
+                    control = ctrl.nlme,
+                    verbose = T)
+save(fit2b.nlme.6C, file = '~/Documents/GMI/fit2b.nlme.6C.rda')
+
+# CONVERGES
+fit2c.nlme.6C <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
+                    fixed = list(M0 ~ acn, r ~ acn, beta ~1),
+                    groups = ~ acn,
+                    start = c(fixef(fit2b.nlme.6C)[1:249], fixef(fit2b.nlme.6C)[250], rep(0, n.acns), fixef(fit2b.nlme.6C)[251]),
+                    random = pdBlocked(list(M0 ~ 1, r ~ 1, beta ~1)),
+                    data = lemna.6C,
+                    control = ctrl.nlme,
+                    verbose = T)
+save(fit2c.nlme.6C, file = '~/Documents/GMI/fit2c.nlme.6C.rda')
+
+fit2d.nlme.6C <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
+                    fixed = list(M0 ~ acn, r ~ acn, beta ~1),
+                    groups = ~ ID,
+                    start = fixef(fit2c.nlme.6C),
+                    correlation = ccorCAR1(form = ~ DAS_decimal)
+                    random = pdBlocked(list(M0 ~ 1, r ~ 1, beta ~1)),
+                    data = lemna.6C,
+                    control = ctrl.nlme,
+                    verbose = T)
+
+
+```
+
+
 ```{r 16C}
 ctrl.nls <- nls.control(maxiter = 1000, warnOnly = T)
 ctrl.nlme <- nlmeControl(maxIter = 5000, msMaxIter = 100000, opt = 'nlminb')
