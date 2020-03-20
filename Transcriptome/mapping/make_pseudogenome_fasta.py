@@ -2,10 +2,10 @@
 
 '''
 need extra mem (10GB?)
-ml IPython/6.4.0-foss-2018a-Python-3.6.4
-FASTA /lustre/scratch/users/pieter.clauw/Transcriptome/6vs16/Data/Genome/TAIR10_genome.fasta
-VCF /lustre/scratch/users/pieter.clauw/Transcriptome/6vs16/Data/Genome/intersection_6017.vcf
-OUTPUT = /lustre/scratch/users/pieter.clauw/Transcriptome/6vs16/Data/Genome/pseudoTAIR10_6017.fasta
+ml ipython/7.2.0-foss-2018b-python-3.6.6 
+FASTA = '/scratch-cbe/users/pieter.clauw/16vs6/Data/Genome/TAIR10_chromosomes.fas'
+VCF = '/scratch-cbe/users/pieter.clauw/16vs6/Data/Genome/1001genomes_snp-short-indel_only_ACGTN_6017.vcf.gz' 
+OUTPUT = '/scratch-cbe/users/pieter.clauw/16vs6/Data/Genome/pseudogenomes/pseudoTAIR10_6017.fasta'
 
 Original by Michael Schon:
 adjustements by Pieter Clauw:
@@ -118,4 +118,4 @@ if __name__ == '__main__':
     
     outfile.close()
     print("Pseudogenome saved to {}".format(args.OUTPUT))
-    
+
