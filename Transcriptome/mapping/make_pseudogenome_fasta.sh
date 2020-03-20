@@ -17,7 +17,7 @@ FASTA=${mainDir}TAIR10_chromosomes.fas
 VCFlst=${mainDir}vcf_for_pseudogenome.txt
 VCF=$(sed -n ${i}p $VCFlst)
 OUT=${VCF/1001genomes_snp-short-indel_only_ACGTN/pseudogenomes/pseudoTAIR10}
-OUT=${OUT/.vcf.gz/.fasta}
+OUT=${OUT/.vcf/.fasta}
 
 # MAKE PSEUDO GENOMES #
 python $PSEUDOGENIZE -O $OUT $FASTA $VCF
