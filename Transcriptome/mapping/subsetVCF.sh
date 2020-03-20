@@ -16,7 +16,7 @@ accessions=(6017 9728 9559 8242 9888 9433 9075)
 
 acn=${accessions[$i]}
 
-out=${VCF/.vcf.gz/_${acn}.vcf.gz}
+out=${VCF/.vcf.gz/_${acn}.vcf}
 vcf-subset -c $acn $VCF > $out
 
 
