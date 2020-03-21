@@ -3,7 +3,7 @@
 # stage rawdata bamfiles from rawdata repository to scratch-cbe
 
 # SLURM #
-SBATCH --output Logs/stage_bamfiles.log
+#SBATCH --output Logs/stage_bamfiles.log
 
 SAMPLES=/groups/nordborg/projects/cegs/16Vs6C/Data/Transcriptome/RawData/samples.txt
 BAMFILES=($(awk 'NR>1 {print $10}' $SAMPLES))
