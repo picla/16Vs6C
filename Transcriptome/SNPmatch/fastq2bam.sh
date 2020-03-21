@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # SLURM
-#SBATCH --output Logs/FastqToBam_%A_%a.log
+#SBATCH --output Logs/fastq2bam_%A_%a.log
 #SBATCH --array 1-120:2
 
 # MODULES #
