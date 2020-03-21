@@ -1,27 +1,26 @@
 #!/bin/sh
 
-# PBS directives
-#PBS -P cegs
-#PBS -N bamToFastq
-#PBS -j oe
-#PBS -o Logs/bamToFastq_^array_index^.log
-#PBS -J 1-5
-#PBS -l walltime=6:00:00,mem=10GB
+# SLURM # 
+#SBATCH --output Logs/bamToFastq_%A_%a.log
+#SBATCH --mem=10GB
+#SBATCH --array=1-60
+
+#TODO: make list of BAMraw files
 
 # MODULES #
-ml BEDTools/2.26.0-foss-2017a
-ml SAMtools/1.6-foss-2017a
+ml bedtools/2.27.1-foss-2018b
+ml samtools/1.9-foss-2018b
 
 # DATA #
-i=$PBS_ARRAY_INDEX
-DATAdir=/lustre/scratch/users/pieter.clauw/Transcriptome/6vs16/Data/
-BAMlst=${DATAdir}CD3TJANXX_bamList.txt
-BAM=${DATAdir}$(sed "${i}q;d" $BAMlst)
+i=$SLURM_ARRAY_TASK_ID
+DATAdir=/scratch-cbe/users/pieter.clauw/16vs6/Data/Transcriptome/
+BAMlst=${DATAdir}BAMraw_list.txt
+BAM=$(sed "${i}q;d" $BAMlst)
 BAMbase=$(basename -s .bam $BAM)
 
-BAMsort=${DATAdir}${BAMbase}.qsort.bam
-FASTQ1=${DATAdir}${BAMbase}.end1.fastq
-FASTQ2=${DATAdir}${BAMbase}.end2.fastq
+BAMsort=${DATAdir}BAMraw/${BAMbase}.qsort.bam
+FASTQ1=${DATAdir}FASTQraw/${BAMbase}.end1.fastq
+FASTQ2=${DATAdir}FASTQraw/${BAMbase}.end2.fastq
 
 # sort bam file in order to make 2 fastq files -> paired-end data
 samtools sort -n $BAM -o $BAMsort
