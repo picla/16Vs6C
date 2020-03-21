@@ -5,7 +5,8 @@
 #SBATCH --mem=10GB
 #SBATCH --array=1-60
 
-#TODO: make list of BAMraw files
+# WARNING: script suffers from random craches due to stale file handling in internal files of bedtools and/or samtools.
+# check log files after running and rerun failed processes
 
 # MODULES #
 ml bedtools/2.27.1-foss-2018b
