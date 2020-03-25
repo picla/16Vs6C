@@ -2,6 +2,7 @@
 
 # SLURM
 #SBATCH --output Logs/fastq2bam_%A_%a.log
+#SBATCH --mem=10GB
 #SBATCH --array 1-120:2
 
 # MODULES #
