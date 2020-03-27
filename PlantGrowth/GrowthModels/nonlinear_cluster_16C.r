@@ -9,7 +9,7 @@ options(stringsAsFactors = F)
 library(tidyverse)
 library(nlme)
 library(optparse)
-setwd('/scratch-cbe/users/pieter.clauw/16vs6/')
+setwd('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/')
 ctrl <- nlmeControl(msMaxIter = 1000, maxIter = 1000, opt = 'nlminb')
 
 ## self start function from ecology paper
@@ -61,14 +61,14 @@ lemna.16C <- lemna %>%
 
 # model #
 # load latest succesful model
-load('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit2e.nlme.16C.rda')
+load('Results/Growth/nonlinear/fit2f.nlme.16C.rda')
 
 # model #
-fit2f.nlme.16C <- update(fit2e.nlme.16C,
+fit2g.nlme.16C <- update(fit2f.nlme.16C,
                         fixed = list(M0 ~ acn, r ~ acn, beta ~ 1),
                         groups = ~ ID,
-                        start = fixef(fit2e.nlme.16C),
-                        random = pdBlocked(list(M0 ~ replicate, r ~ 1, beta ~ 1)),
+                        start = fixef(fit2f.nlme.16C),
+                        random = pdDiag(list(M0 ~ replicate, r ~ 1, beta ~ 1)),
                         correlation = corCAR1(form =  ~ DAS_decimal),
                         data = lemna.16C,
                         control = ctrl,
@@ -76,7 +76,7 @@ fit2f.nlme.16C <- update(fit2e.nlme.16C,
 
 
 # save model
-save(fit2f.nlme.16C, file = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit2f.nlme.16C.rda')
+save(fit2g.nlme.16C, file = 'Results/Growth/nonlinear/fit2g.nlme.16C.rda')
 
 
 
