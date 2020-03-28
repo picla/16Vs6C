@@ -9,7 +9,7 @@ options(stringsAsFactors = F)
 library(tidyverse)
 library(nlme)
 library(optparse)
-setwd('/scratch-cbe/users/pieter.clauw/16vs6/')
+setwd('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/')
 ctrl <- nlmeControl(msMaxIter = 1000, maxIter = 1000, opt = 'nlminb')
 
 ## self start function from ecology paper
@@ -61,21 +61,44 @@ lemna.6C <- lemna %>%
 
 # model #
 # load latest succesful model
-load('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit5.nlme.6C.rda')
+load('Results/Growth/nonlinear/fit4.nlme.6C.rda')
+load('Results/Growth/nonlinear/fit5.nlme.6C.rda')
+
+# update rnadom effects of fit4
+# CONVERGES
+fit4b.nlme.6C <- update(fit4.nlme.6C,
+                        fixed = list(M0 + r ~ acn, beta ~ 1),
+                        groups = ~ acn,
+                        start = fixef(fit4.nlme.6C),
+                        random = pdDiag(list(M0 ~ replicate, r ~ 1, beta ~ 1)),
+                        data = lemna.6C,
+                        control = ctrl,
+                        verbose = T)
+
+# try pdBlocked
+fit4c.nlme.6C <- update(fit4.nlme.6C,
+                        fixed = list(M0 + r ~ acn, beta ~ 1),
+                        groups = ~ acn,
+                        start = fixef(fit4.nlme.6C),
+                        random = pdBlocked(list(M0 ~ replicate, M0 ~ 1,r ~ 1,beta ~ 1)),
+                        data = lemna.6C,
+                        control = ctrl,
+                        verbose = T)
+save(fit4c.nlme.6C, file = 'Results/Growth/nonlinear/fit4c.nlme.6C.rda')
+
 
 # model #
 fit5b.nlme.6C <- update(fit5.nlme.6C,
                         fixed = list(M0 + r ~ acn, beta ~ 1),
                         groups = ~ ID,
                         start = fixef(fit5.nlme.6C),
-                        random = pdBlocked(list(M0 ~ replicate, r ~ 1)),
-                        correlation = corCAR1(form =  ~ DAS_decimal),
+                        random = pdDiag(list(M0 ~ replicate, r ~ 1, beta ~ 1)),
                         data = lemna.6C,
                         control = ctrl,
                         verbose = T)
 
 
 # save model
-save(fit5b.nlme.6C, file = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit5b.nlme.6C.rda')
+save(fit5b.nlme.6C, file = 'Results/Growth/nonlinear/fit5b.nlme.6C.rda')
 
 
