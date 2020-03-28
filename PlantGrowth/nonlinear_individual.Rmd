@@ -15,11 +15,18 @@ knitr::opts_knit$set(root.dir = "/groups/nordborg/user/pieter.clauw/Documents/Ex
 ## Modelling by individual
 In order to calculate heritbaility estimates, a nonlinear model is built for each individual plant
 
+## DISCLAIMER
+Modelling per individual is giving NA vlaues for many individuals.
+Better to include random effects fro each individual for M0, r and beta.
+This is there for 16C in the fit2f.nlme.16C model.
+Not yet for 6C. try to get these as well.
 
 ```{r data}
 lemna <- read_delim('Data/Growth/rawdata_combined_annotation_NO.txt', delim = '\t')
 load('Results/Growth/nonlinear/fit5.nlme.6C.rda')
 load('Results/Growth/nonlinear/fit2f.nlme.16C.rda')
+
+fit.nlme <- list('6C' = fit5.nlme.6C, '16C' = fit2f.nlme.16C)
 ```
 
 ```{r functions}
@@ -76,15 +83,22 @@ produces many NA values
 
 try with for loop
 ```{r model per individual}
+ctrl <- nls.control(maxiter = 1000, warnOnly = T)
 A.1_a1_16C_rep3           NA            NA            NA
 A.1_a1_6C_rep1  1.284910e+03  2.330741e-02  1.116723e+00
 
 ID <- 'A.1_a1_16C_rep3'
-temp <- 
+temp <- strsplit(ID, split = '_')[[1]][3]
+acn <- unique(lemna$acn[lemna$ID == ID])
 
+fix.temp <- fixef(fit.nlme[[temp]])
+M0.start <- fix.temp['M0.(Intercept)'] + fix.temp[paste('M0.acn', acn, sep = '')]
+r.start <- fix.temp['r.(Intercept)'] + fix.temp[paste('r.acn', acn, sep = '')]
+beta.start <- fix.temp['beta']
 
 lemna.ID <- filter(lemna, ID == !!ID)  
 fit.ID <- nls(Area ~ SS.pow(DAS_decimal, M0, r, beta),
+              start = list('M0' = M0.start, 'r' = r.start, 'beta' = beta.start),
               data = lemna.ID,
               control = ctrl,
               trace = T)
