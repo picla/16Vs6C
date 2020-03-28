@@ -44,7 +44,7 @@ powermodelInit=function(mCall,LHS,data){
 SSpower=selfStart(powermodel,powermodelInit,c("a","b","c"))
 
 
-## self start function from ecology paper
+## self start function from Paine et al., 2012. Methods Ecol. Evol.
 # Self-start function for power-law fit. This self-start for this model is not provided by Pinhero and Bates (2000), so I wrote one. Unfortunately, it often does not lead to convergence. Any suggestions would be welcome
 fmla.pow <- as.formula("~(M0^(1-beta) + r*x*(1-beta))^(1/(1-beta))")
 Init.pow <- function(mCall, LHS, data){
