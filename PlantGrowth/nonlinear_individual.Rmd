@@ -1,0 +1,30 @@
+---
+title: "indvidual nonlinear models"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(tidyverse)
+library(nlme)
+library(ggpubr)
+knitr::opts_knit$set(root.dir = "/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/")
+```
+
+## Modelling by individual
+In order to calculate heritbaility estimates, a nonlinear model is built for each individual plant
+
+
+```{r data}
+lemna <- 
+```
+
+```{r functions}
+
+```
+
+
+
+
+
