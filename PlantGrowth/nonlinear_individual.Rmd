@@ -9,7 +9,7 @@ options(stringsAsFactors = F)
 library(tidyverse)
 library(nlme)
 library(ggpubr)
-knitr::opts_knit$set(root.dir = "/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/")
+knitr::opts_knit$set(root.dir = "/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/")
 ```
 
 ## Modelling by individual
@@ -17,13 +17,80 @@ In order to calculate heritbaility estimates, a nonlinear model is built for eac
 
 
 ```{r data}
-lemna <- 
+lemna <- read_delim('Data/Growth/rawdata_combined_annotation_NO.txt', delim = '\t')
+load('Results/Growth/nonlinear/fit5.nlme.6C.rda')
+load('Results/Growth/nonlinear/fit2f.nlme.16C.rda')
 ```
 
 ```{r functions}
+## self start function from Paine et al., 2012. Methods Ecol. Evol.
+# Self-start function for power-law fit. This self-start for this model is not provided by Pinhero and Bates (2000), so I wrote one. Unfortunately, it often does not lead to convergence. Any suggestions would be welcome
+fmla.pow <- as.formula("~(M0^(1-beta) + r*x*(1-beta))^(1/(1-beta))")
+Init.pow <- function(mCall, LHS, data){
+    xy <- sortedXyData(mCall[["x"]], LHS, data)
+    if(nrow(xy) < 4) {stop("Too few distinct x values to fit a power-law")}
+	r    <-coef(lm(log(y) ~ x, xy))[2]    # Use the slope from a log fit to the data as an initial guess for r
+	M0   <- min(xy$y)		              # Use the minimum y value as an initial guess for M0
+	beta <- 0.9	                          # give initial guess of beta as 0.9. don't use beta = 1, as it's undefined (1/0)
+    value <- c(M0, r, beta) 
+    names(value) <- mCall[c("M0", "r", "beta")]
+ 	return(value)
+	}
+SS.pow  <- selfStart(fmla.pow, initial = Init.pow, parameters = c("M0", "r", "beta"))
 
 ```
 
+```{r data preparation}
+lemna$ID <- paste(lemna$pot, lemna$experiment, sep = '_')
+lemna$acn <- as.character(lemna$acn)
+lemna$Area[lemna$Area == 0] <- NA
+
+# only use accessions which have data for all replicates
+acns_rep1 <- unique(lemna$acn[lemna$replicate == 'rep1'])
+acns_rep2 <- unique(lemna$acn[lemna$replicate == 'rep2'])
+acns_rep3 <- unique(lemna$acn[lemna$replicate == 'rep3'])
+
+acns_rep123 <- intersect(intersect(acns_rep2, acns_rep3), acns_rep1)
+
+
+lemna <- lemna %>%
+  drop_na(Area) %>%
+  filter(acn %in% acns_rep123) %>%
+  select(ID, acn, experiment, temperature, replicate, DAS_decimal, Area) %>%
+  mutate(DAS = round(DAS_decimal),
+         ID = as.factor(ID),
+         acn = as.factor(acn),
+         temperature = as.factor(temperature),
+         replicate = as.factor(replicate),
+         experiment = as.factor(experiment))
+```
+
+
+```{r model per individual - nlsList}
+ctrl <- nls.control(maxiter = 1000, warnOnly = T)
+fm.lis <- nlsList(Area ~ SS.pow(DAS_decimal, M0, r, beta) | ID,
+                         data = lemna,
+                         control = ctrl)
+```
+produces many NA values
+
+try with for loop
+```{r model per individual}
+A.1_a1_16C_rep3           NA            NA            NA
+A.1_a1_6C_rep1  1.284910e+03  2.330741e-02  1.116723e+00
+
+ID <- 'A.1_a1_16C_rep3'
+temp <- 
+
+
+lemna.ID <- filter(lemna, ID == !!ID)  
+fit.ID <- nls(Area ~ SS.pow(DAS_decimal, M0, r, beta),
+              data = lemna.ID,
+              control = ctrl,
+              trace = T)
+
+
+```
 
 
 
