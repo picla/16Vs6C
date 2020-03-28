@@ -9,7 +9,7 @@ options(stringsAsFactors = F)
 library(tidyverse)
 library(nlme)
 library(ggpubr)
-knitr::opts_knit$set(root.dir = "/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/")
+knitr::opts_knit$set(root.dir = "/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/")
 ```
 
 
@@ -58,9 +58,6 @@ Init.pow <- function(mCall, LHS, data){
  	return(value)
 	}
 SS.pow  <- selfStart(fmla.pow, initial = Init.pow, parameters = c("M0", "r", "beta"))
-
-
-
 ```
 ```{r data preparation}
 lemna$ID <- paste(lemna$pot, lemna$experiment, sep = '_')
@@ -322,6 +319,17 @@ fit5b.nlme.6C <- update(fit5.nlme.6C,
                     data = lemna.6C,
                     control = ctrl.nlme,
                     verbose = T)
+
+fit5c.nlme.6C <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
+                      fixed = list(M0 + r ~ acn, beta ~ 1),
+                      groups =  ~ ID,
+                      start = fixef(fit5.nlme.6C),
+                      random = list(M0 + r + beta ~ 1),
+                      correlation = corCAR1(form = ~ DAS_decimal),
+                      data = lemna.6C,
+                      control = ctrl.nlme,
+                      verbose = T)
+save(fit5c.nlme.6C, file = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit5c.nlme.6C.rda')
 
 # NO CONVERGENCE
 fit7.nlme <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
