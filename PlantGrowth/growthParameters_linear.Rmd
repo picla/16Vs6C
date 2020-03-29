@@ -1,0 +1,226 @@
+---
+title: "growthParameters"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(tidyverse)
+library(nlme)
+source('Rfunctions.R')
+source('../Functions/H.r')
+knitr::opts_knit$set(root.dir = "/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/")
+```
+
+```{r data}
+# estimated marginal means fron mixed nmodel
+growth <- read_delim('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/lemna_DAS_allReps_NO_logRosette_emmeans_V3_CorCAR1_correct.txt', delim = '\t')
+lemna <- read_delim('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Growth/rawdata_combined_annotation_NO.txt', delim = '\t')
+
+# models
+baseModel <- get(load("/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/poly3_logRosette_NO_allReps_V3_corCAR1_correct.rda"))
+expFixed <- get(load("/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/poly3_logRosette_NO_allReps_V3_corCAR1_expFixed.rda"))
+
+# randomisation Files
+randomFiles <- list.files('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Setup/GrowthChamber/', pattern = 'chamberRandomisation_.*_rep', full.names = T)
+randomisations <- lapply(randomFiles, FUN = read.table, header = T, stringsAsFactors = F)
+names(randomisations) <- c('16C_rep1', '16C_rep2', '16C_rep3', '6C_rep1', '6C_rep2', '6C_rep3')
+```
+
+```{r remove accessions}
+# 8343 shows a bad model fit to the data
+growth <- growth[growth$acn != 8343, ]
+```
+
+```{r general variables}
+accessions <- unique(growth$acn)
+temperatures <- unique(growth$temp)
+DASs <- unique(lemna$DAS)
+experiments <- unique(lemna$experiment)
+replicates <- unique(lemna$replicate)
+replicates.h <- c(replicates, 'overall')
+
+```
+
+```{r visuals}
+tempCol <- c('blue', 'red')
+repPch <- c(15:18)
+repType <- c('b', 'b', 'b', 'l')
+visTempRep <- data.frame('temperature' = rep(temperatures, each = length(replicates.h)), 'replicate' = rep(replicates.h, length(temperatures)), 'tempCol' = rep(tempCol, each = length(replicates.h)), 'repPch' = rep(repPch, length(temperatures)), repType = rep(repType, length(temperatures)))
+```
+
+```{r model predictions}
+# prepare newdata for prediction
+predictDataFrames <- lapply(experiments, FUN = predictData.PerExperiment)
+predictData <- do.call(rbind, predictDataFrames)
+predictData$acn <- as.factor(as.character(predictData$acn))
+
+# predict
+predictData$logArea <- predict(baseModel, newdata = predictData)
+
+# add meta info
+predictData$replicate <- unlist(lapply(predictData$experiment, function(exp){strsplit(exp, split = '_')[[1]][2]}))
+```
+
+# Growth Parameters
+After phenotyping and normalising the data, we obtained rosette area estimates for each accession summarised for each experiment but also summarised for each temperature (over the three replicate experiments).
+
+Now we want to find the best summary for growth.
+
+## rosette areas at 35DAS have relatively high heritabilities (especially within specific experiments)
+```{r calculate heritabilities}
+# dataframes to store heritbailities based on raw data and predicted data respectively
+h <- data.frame('DAS' = rep(DASs, length(temperatures) * length(replicates.h)), 'temperature' =  rep(temperatures, each = length(DASs) * length(replicates.h)), 'replicate' = rep(rep(replicates.h, each = length(DASs)), length(temperatures)), 'H' = NA, stringsAsFactors = F)
+
+
+for (rep in replicates.h)
+{  
+  # select specific replicate data if necessary
+  predictData.r <- predictData
+  if (rep != 'overall')
+  {
+    predictData.r <- predictData[predictData$replicate == rep, ]
+  }
+  
+  for (t in temperatures)
+  {
+    for (DAS in DASs)
+    {
+      predictData.r.t.d <- predictData.r[predictData.r$temperature == t & predictData.r$DAS == DAS, c('acn', 'logArea')]
+      if (nrow(predictData.r.t.d) == 0){h$H[h$DAS == DAS & h$temperature == t & h$replicate == rep] <- NA}
+      else {h$H[h$DAS == DAS & h$temperature == t & h$replicate == rep] <- H(predictData.r.t.d, print = F)[4]}
+    }
+  }
+}
+```
+```{r plot heritabilities}
+minH <- min(h$H, na.rm = T)
+maxH <- max(h$H, na.rm = T)
+par(mar=c(5.1, 4.1, 4.1, 8.1), xpd=TRUE)
+plot(NA,NA, xlim = c(DASs[1], DASs[length(DASs)]), ylim = c(minH, maxH), xlab = 'days after stratification (DAS)', ylab = 'broad sense heritability')
+for (t in temperatures)
+{
+  for (rep in replicates.h)
+  {
+    # select H for given temperature and replicate
+    h.t.r <- h[h$temperature == t & h$replicate == rep, ]
+    # plot properties
+    col <- visTempRep$tempCol[visTempRep$temperature == t]
+    pch <- visTempRep$repPch[visTempRep$replicate == rep]
+    type <- unique(visTempRep$repType[visTempRep$replicate == rep])
+    #plot lines
+    lines(h.t.r$DAS, h.t.r$H, col = col, pch = pch, type = type)
+    # legend
+    legend('topright', inset=c(-0.25,0), legend = c(temperatures, replicates.h), col = c(tempCol, rep('black', length(replicates.h))), pch = c(NA,NA, repPch[1:3], NA), lty = c(1,1, NA, NA, NA, 1))
+  }
+}
+```
+
+
+
+## which fraction of heritability is due to initial growth (14DAS)?
+
+
+## which summary for growth over time has sufficiently high heritabilities
+```{r data preparation}
+predictData.wide <- as_tibble(predictData) %>%
+  pivot_wider(values_from = logArea, names_from = DAS, names_prefix = 'logArea_DAS_')
+```
+
+### percent increase
+```{r percent increase}
+predictData.wide <- predictData.wide %>%
+  mutate(percentIncrease = ((logArea_DAS_35 - logArea_DAS_14)/logArea_DAS_14) * 100)
+
+plot(predictData.wide$logArea_DAS_35, predictData.wide$percentIncrease)
+```
+
+
+
+### linear growth
+#### not corrected for initial growth
+##### between first and last time points
+```{r linear growth noncorrected 14_35}
+getSlope.ind.noncorr.14.35 <- function(ID)
+{
+  getSlope.ind(ID, DASs = c(14, 35), growth = predictData)
+}
+
+predictData.wide$LGR_nonCorr_14_35 <- mapply(predictData.wide$ID, FUN = getSlope.ind.noncorr.14.35)
+```
+
+##### over all time points
+```{r linear growth noncorrected all timepoints}
+getSlope.ind.noncorr.all <- function(ID)
+{
+  getSlope.ind(ID, DASs = c(14:35), growth = predictData)
+}
+
+predictData.wide$LGR_nonCorr_all <- mapply(predictData.wide$ID, FUN = getSlope.ind.noncorr.all)
+```
+
+#### corrected for initial growth
+##### between first and last time points
+```{r linear growth corrected 14_35}
+# TEST #
+getSlope.ind.corr <- function(ID, DASs, growth)
+{
+  growth.ind <- growth[growth$ID == ID & growth$DAS %in% DASs, ]
+  growth.ind$DAS14 <- growth$logArea[growth$ID == ID & growth$DAS == 14]
+  if (any(is.na(growth.ind$logArea))){return(NA)}
+  else{
+    fit <- lm(logArea ~ DAS14 + DAS, data = growth.ind)
+    return(fit$effects[2])
+  }
+}
+
+
+```
+
+
+##### over all time points
+
+
+
+## Try growthrates package
+```{r growthrates TEST}
+# TODO:tidyverse
+predictData.ind <- predictData[predictData$ID == predictData$ID[1],]
+predictData.ind$area <- exp(predictData.ind$logArea)
+predictData.ind$DAS0 <- predictData.ind$DAS - 15
+
+p     <- c(y0 = min(predictData.ind$area), mumax = 0.5)
+lower <- c(y0 = min(predictData.ind$area) - 500, mumax = 0)
+upper <- c(y0 = min(predictData.ind$area) + 500, mumax = 1)
+
+fit_exp <- fit_growthmodel(FUN = grow_exponential, p = p, predictData.ind$DAS0, predictData.ind$area,
+                        lower = lower, upper = upper)
+
+
+p     <- c(y0 = min(predictData.ind$area), mumax = 0.5, K = max(predictData.ind$area)+20000)
+lower <- c(y0 = min(predictData.ind$area) - 500, mumax = 0, K = max(predictData.ind$area) - 10000)
+upper <- c(y0 = min(predictData.ind$area) + 500, mumax = 1, K = max(predictData.ind$area) + 30000)
+
+fit_log <- fit_growthmodel(FUN = grow_logistic, p = p, predictData.ind$DAS0, predictData.ind$area,
+                        lower = lower, upper = upper)
+
+
+p     <- c(yi = 0.02, ya = 0.001, kw = 0.1, mumax = 0.2, K = 0.1)
+lower <- c(yi = 1e-6, ya = 1e-6, kw = 0,    mumax = 0,   K = 0)
+upper <- c(yi = 0.05, ya = 0.05, kw = 10,   mumax = 5,   K = 0.5)
+
+fit2 <- fit_growthmodel(FUN = grow_twostep, p = p, time = dat$time, y = dat$value,
+                        lower = lower, upper = upper)
+
+coef(fit1)
+
+
+```
+
+
+
+## correlations between growth parameters
+
+
+## heritabilities of growth parameters
