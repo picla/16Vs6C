@@ -69,6 +69,10 @@ for (i in 1:nrow(model.par))
   model.par$r[i] <- sum(c(fxeff['r.(Intercept)'], fxeff[paste('r.acn', acn, sep = '')]), na.rm = T)
   model.par$beta[i] <- fxeff['beta']
 }
+
+model.par <- mutate(model.par,
+                    r_rel = r/M0,
+                    M0_log = log(M0))
 ```
 
 ```{r visualise}
@@ -81,11 +85,22 @@ r <- ggplot(model.par, aes(x = r, color = temperature, fill = temperature)) +
   geom_histogram(bins = 100, alpha = 0.5) +
   ggtitle('r')
 
+r_rel <- ggplot(model.par, aes(x = r_rel, color = temperature, fill = temperature)) +
+  geom_histogram(bins = 100, alpha = 0.5) +
+  ggtitle('r_rel')
+
+
 ```
 
 ```{r output}
 # transform tibble to wide format -> compatible for GWAS
+model.par.wide <- model.par %>%
+  pivot_wider(id_cols = acn,
+              names_from = temperature,
+              values_from = c(M0, M0_log, r, r_rel, beta),
+              names_sep = '_')
 
+write_csv(model.par.wide, path = 'Results/Growth/nonlinear/modelParameters.csv')
 
 ```
 
