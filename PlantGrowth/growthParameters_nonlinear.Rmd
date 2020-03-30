@@ -1,0 +1,113 @@
+---
+title: "growthRates"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(tidyverse)
+library(nlme)
+library(ggpubr)
+knitr::opts_knit$set(root.dir = "/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/")
+```
+
+```{r data}
+lemna <- read_delim('Data/Growth/rawdata_combined_annotation_NO.txt', delim = '\t')
+load('Results/Growth/nonlinear/fit5.nlme.6C.rda')
+load('Results/Growth/nonlinear/fit2f.nlme.16C.rda')
+fit.nlme <- list('6C' = fit5.nlme.6C, '16C' = fit2f.nlme.16C)
+```
+```{r data preparation}
+lemna$ID <- paste(lemna$pot, lemna$experiment, sep = '_')
+lemna$acn <- as.character(lemna$acn)
+lemna$Area[lemna$Area == 0] <- NA
+
+# only use accessions which have data for all replicates
+acns_rep1 <- unique(lemna$acn[lemna$replicate == 'rep1'])
+acns_rep2 <- unique(lemna$acn[lemna$replicate == 'rep2'])
+acns_rep3 <- unique(lemna$acn[lemna$replicate == 'rep3'])
+
+acns_rep123 <- intersect(intersect(acns_rep2, acns_rep3), acns_rep1)
+
+
+lemna <- lemna %>%
+  drop_na(Area) %>%
+  filter(acn %in% acns_rep123) %>%
+  select(ID, acn, experiment, temperature, replicate, DAS_decimal, Area) %>%
+  mutate(DAS = round(DAS_decimal),
+         ID = as.factor(ID),
+         acn = as.factor(acn),
+         temperature = as.factor(temperature),
+         replicate = as.factor(replicate),
+         experiment = as.factor(experiment))
+```
+```{r general variables}
+temperatures <- unique(lemna$temperature)
+accessions <- unique(lemna$acn)
+```
+
+
+## model parameters
+```{r get fixed effects}
+model.par <- tibble(
+  'acn' = rep(accessions, length(temperatures)),
+  'temperature' = rep(temperatures, each = length(accessions)),
+  'M0' = rep(NA, length(temperatures) * length(accessions)),
+  'r' = rep(NA, length(temperatures) * length(accessions)),
+  'beta' = rep(NA, length(temperatures) * length(accessions))
+)
+
+
+for (i in 1:nrow(model.par))
+{
+  temp <- model.par$temperature[i]
+  acn <- model.par$acn[i]
+  fxeff <- fixef(fit.nlme[[temp]])
+  
+  model.par$M0[i] <- sum(c(fxeff['M0.(Intercept)'],fxeff[paste('M0.acn', acn, sep = '')]), na.rm = T)
+  model.par$r[i] <- sum(c(fxeff['r.(Intercept)'], fxeff[paste('r.acn', acn, sep = '')]), na.rm = T)
+  model.par$beta[i] <- fxeff['beta']
+}
+
+model.par <- mutate(model.par,
+                    r_rel = r/M0,
+                    M0_log = log(M0))
+```
+
+```{r visualise}
+
+M0 <- ggplot(model.par, aes(x = M0, color = temperature, fill = temperature)) +
+  geom_histogram(bins = 100, alpha = 0.5) +
+  ggtitle('M0')
+
+M0_log <- ggplot(model.par, aes(x = M0_log, color = temperature, fill = temperature)) +
+  geom_histogram(bins = 100, alpha = 0.5) +
+  ggtitle('log(M0)')
+
+r <- ggplot(model.par, aes(x = r, color = temperature, fill = temperature)) +
+  geom_histogram(bins = 100, alpha = 0.5) +
+  ggtitle('r')
+
+r_rel <- ggplot(model.par, aes(x = r_rel, color = temperature, fill = temperature)) +
+  geom_histogram(bins = 100, alpha = 0.5) +
+  ggtitle('r_rel')
+
+
+```
+
+```{r output}
+# transform tibble to wide format -> compatible for GWAS
+model.par.wide <- model.par %>%
+  pivot_wider(id_cols = acn,
+              names_from = temperature,
+              values_from = c(M0, M0_log, r, r_rel, beta),
+              names_sep = '_')
+
+write_csv(model.par.wide, path = 'Results/Growth/nonlinear/modelParameters.csv')
+
+```
+
+
+
+
