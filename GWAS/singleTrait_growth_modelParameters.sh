@@ -15,8 +15,8 @@ i=$SLURM_ARRAY_TASK_ID
 allphenotypes=/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/modelParameters.csv
 trait=$(head -n 1 $allphenotypes | cut -d',' -f $i)
 
-PHENO=/tmp/{$trait}.csv
-GENO=/scratch-cbe/users/pieter.clauw/genotypes_for_pygwas/1.0.0/1001genomes/
+PHENO=/tmp/${trait}.csv
+GENO=/scratch-cbe/users/pieter.clauw/common_data/genotypes_for_pygwas/1.0.0/1001genomes/
 OUT=/scratch-cbe/users/pieter.clauw/16vs6/Results/GWAS/singleTrait/                                                                                      
 awk -F ',' -v OFS=',' -v col="$i" '{print $1,$col}' $allphenotypes > $PHENO
 
