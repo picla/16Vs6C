@@ -81,6 +81,10 @@ M0 <- ggplot(model.par, aes(x = M0, color = temperature, fill = temperature)) +
   geom_histogram(bins = 100, alpha = 0.5) +
   ggtitle('M0')
 
+M0_log <- ggplot(model.par, aes(x = M0_log, color = temperature, fill = temperature)) +
+  geom_histogram(bins = 100, alpha = 0.5) +
+  ggtitle('log(M0)')
+
 r <- ggplot(model.par, aes(x = r, color = temperature, fill = temperature)) +
   geom_histogram(bins = 100, alpha = 0.5) +
   ggtitle('r')
