@@ -72,7 +72,8 @@ for (i in 1:nrow(model.par))
 
 model.par <- mutate(model.par,
                     r_rel = r/M0,
-                    M0_log = log(M0))
+                    M0_log = log(M0),
+                    r_rel_log = r/M0_log)
 ```
 
 ```{r visualise}
@@ -93,7 +94,13 @@ r_rel <- ggplot(model.par, aes(x = r_rel, color = temperature, fill = temperatur
   geom_histogram(bins = 100, alpha = 0.5) +
   ggtitle('r_rel')
 
+r_rel_log <- ggplot(model.par, aes(x = r_rel_log, color = temperature, fill = temperature)) +
+  geom_histogram(bins = 100, alpha = 0.5) +
+  ggtitle('r_rel')
 
+pdf('Results/Growth/Plots/histogram_nonlinear_M0_r.pdf')
+ggarrange(M0, r, common.legend = T, legend = 'right')
+dev.off()
 ```
 
 ```{r output}
