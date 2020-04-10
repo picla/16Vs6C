@@ -11,7 +11,7 @@ all_samples = samples['basename'].to_list()
 #len(all_samples)
 
 ### Import path for every json file
-import os
+import os, json
 files = []
 
 for file in os.listdir('/scratch-cbe/users/pieter.clauw/16vs6/Results/Transcriptome/genotyping/snpmatch/'):
