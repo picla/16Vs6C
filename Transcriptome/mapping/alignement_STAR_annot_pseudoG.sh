@@ -9,19 +9,19 @@
 #PBS -J 1-10:2
 
 # MODULES #
-ml STAR/2.5.3a-foss-2016a
-ml SAMtools/1.3.1-foss-2016a
+ml star/2.7.1a-foss-2018b
+ml samtools/1.9-foss-2018b 
 
 # DATA #
 i=$PBS_ARRAY_INDEX
-mainDir=${WORK}Transcriptome/6vs16/Data/
-fqLst=${mainDir}CD3TJANXX_fastqList.txt
-samples=${mainDir}samples.txt
-raw_fq1_gz=${mainDir}$(sed -n ${i}p $fqLst)
-raw_fq2_gz=${raw_fq1_gz/end1/end2}
+mainDir=/scratch-cbe/users/pieter.clauw/16vs6/Data/Transcriptome/
 
-raw_fq1=${mainDir}$(basename -s .gz $raw_fq1_gz)
-raw_fq2=${mainDir}$(basename -s .gz $raw_fq2_gz)
+ls -d ${mainDir}/FASTQraw_trimmed/*.fq > fastqList_trimmed.txt
+
+fqLst=${mainDir}fastqList_trimmed.txt
+samples=/groups/nordborg/projects/cegs/16Vs6C/Data/Transcriptome/RawData/samples.txt
+raw_fq1=$(sed -n ${i}p $fqLst)
+raw_fq2=${raw_fq1/end1_val1/end2_val2}
 
 fqbase=$(basename -s .end1.fastq $raw_fq1)
 #select sample number (five digit number followed by underscore
@@ -43,14 +43,6 @@ cores=8
 STAR_out=${mainDir}Alignement_STAR_annot/${fqbase}_pseudoG/
 
 mkdir -p $STAR_out
-
-# unzip fastq files #
-echo 'unzipping files:'
-echo $raw_fq1_gz
-echo $raw_fq2_gz
-
-gunzip $raw_fq1_gz
-gunzip $raw_fq2_gz
 
 # RUN #
 STAR \
