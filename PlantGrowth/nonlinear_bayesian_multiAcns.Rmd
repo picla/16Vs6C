@@ -1,0 +1,147 @@
+---
+title: "nonlinear_bayesian_zscore"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(tidyverse)
+library(brms)
+library(ggpubr)
+knitr::opts_knit$set(root.dir = "/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/")
+```
+
+
+```{r data}
+lemna <- read_delim('Data/Growth/rawdata_combined_annotation_NO.txt', delim = '\t')
+linear_params <- read_csv('Results/Growth/nonlinear/modelParameters.csv')
+```
+```{r preparation}
+# data preparation #
+lemna$ID <- paste(lemna$pot, lemna$experiment, sep = '_')
+lemna$acn <- as.character(lemna$acn)
+lemna$Area[lemna$Area == 0] <- NA
+
+# only use accessions which have data for all replicates
+acns_rep1 <- unique(lemna$acn[lemna$replicate == 'rep1'])
+acns_rep2 <- unique(lemna$acn[lemna$replicate == 'rep2'])
+acns_rep3 <- unique(lemna$acn[lemna$replicate == 'rep3'])
+
+acns_rep123 <- intersect(intersect(acns_rep2, acns_rep3), acns_rep1)
+lemna <- lemna[lemna$acn %in% acns_rep123, ]
+
+# subset #
+lemna.sub <- lemna %>%
+  drop_na(Area) %>%
+  mutate(
+         ID,
+         acn = as.factor(acn),
+         experiment = as.factor(experiment),
+         temperature = as.factor(temperature),
+         replicate = as.factor(replicate),
+         DAS_decimal = DAS_decimal - 14,
+         DAS = floor(DAS_decimal),
+         Area) %>%
+  select(ID, acn, experiment, temperature, replicate, DAS_decimal, DAS, Area)
+
+
+# Area transformations
+mean.t0 <- mean(lemna.sub$Area[lemna.sub$DAS == 0])
+sd.t0 <- sd(lemna.sub$Area[lemna.sub$DAS == 0])
+lemna.sub <- lemna.sub %>%
+  mutate(
+    Area.M0z = (Area - mean.t0)/sd.t0,
+    Area.2000px = (Area/2000)
+  )
+
+lemna.16C <- filter(lemna.sub, temperature == '16C')
+lemna.6C <- filter(lemna.sub, temperature == '6C')
+```
+
+
+```{r fit_16C_acns.a}
+# new priors
+mean(lemna.sub$Area[lemna.sub$DAS == 0])
+sd(lemna.sub$Area[lemna.sub$DAS == 0])
+
+
+prior.16C.M0 <- prior(normal(1866.112, 1048.961), nlpar = 'M0')
+prior.16C.r <- prior(normal(0.5, 0.5), nlpar = 'r', lb = 0)
+prior.16C.beta <- prior(normal(0.9, 0.1), nlpar = 'beta', lb = 0)
+
+
+fit_16C_acns.a <- brm(
+  bf(Area ~ (M0^(1 - beta) + r * DAS_decimal * (1 - beta))^(1 / (1 - beta)),
+     M0 ~ 1, r ~ 1, beta ~ 1,
+     nl = T),
+  data = lemna.16C,
+  prior = c(
+    prior.16C.M0,
+    prior.16C.r,
+    prior.16C.beta),
+  cores = 4
+  )
+
+summary(fit_16C_acn.a)
+plot(fit_16C_acn.a)
+plot(conditional_effects(fit_16C_acn.a), points = TRUE)
+```
+
+
+```{r fit_16C_acns.b}
+# new priors
+mean(lemna.sub$Area[lemna.sub$DAS == 0])
+sd(lemna.sub$Area[lemna.sub$DAS == 0])
+
+
+prior.16C.M0 <- prior(normal(0, 1), nlpar = 'M0')
+prior.16C.r <- prior(normal(0.5, 0.5), nlpar = 'r', lb = 0)
+prior.16C.beta <- prior(normal(0.9, 0.1), nlpar = 'beta', lb = 0)
+
+
+fit_16C_acns.b <- brm(
+  bf(Area.M0z ~ (M0^(1 - beta) + r * DAS_decimal * (1 - beta))^(1 / (1 - beta)),
+     M0 ~ 1, r ~ 1, beta ~ 1,
+     nl = T),
+  data = lemna.16C,
+  prior = c(
+    prior.16C.M0,
+    prior.16C.r,
+    prior.16C.beta),
+  cores = 4
+  )
+
+summary(fit_16C_acn.b)
+plot(fit_16C_acn.b)
+plot(conditional_effects(fit_16C_acn.b), points = TRUE)
+```
+
+```{r fit_16C_acns.c}
+# new priors
+mean(lemna.sub$Area[lemna.sub$DAS == 0])
+sd(lemna.sub$Area[lemna.sub$DAS == 0])
+
+
+prior.16C.M0 <- prior(normal(1.8, 1), nlpar = 'M0')
+prior.16C.r <- prior(normal(0.5, 0.5), nlpar = 'r', lb = 0)
+prior.16C.beta <- prior(normal(0.9, 0.1), nlpar = 'beta', lb = 0)
+
+
+fit_16C_acns.b <- brm(
+  bf(Area.2000px ~ (M0^(1 - beta) + r * DAS_decimal * (1 - beta))^(1 / (1 - beta)),
+     M0 ~ 1, r ~ 1, beta ~ 1,
+     nl = T),
+  data = lemna.16C,
+  prior = c(
+    prior.16C.M0,
+    prior.16C.r,
+    prior.16C.beta),
+  cores = 4
+  )
+
+summary(fit_16C_acn.c)
+plot(fit_16C_acn.c)
+plot(conditional_effects(fit_16C_acn.c), points = TRUE)
+```
+
