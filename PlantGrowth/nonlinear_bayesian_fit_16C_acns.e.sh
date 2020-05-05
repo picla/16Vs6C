@@ -7,6 +7,7 @@
 #SBATCH --qos=medium
 
 # setup #
+ml build-env/f2020
 module load r/3.6.0-foss-2019a
 
 # run #
