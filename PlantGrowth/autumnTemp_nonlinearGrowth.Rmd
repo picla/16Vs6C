@@ -1,0 +1,88 @@
+---
+title: "autumnTemp_nonlinearGrowth"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(tidyverse)
+library(glmnet)
+library(glinternet)
+library(caret)
+library(leaps)
+library(ggfortify)
+knitr::opts_knit$set(root.dir = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/')
+```
+
+```{r Data}
+# growth data
+growth <- read_csv('Results/Growth/nonlinear/modelParameters.csv')
+# worldclim data
+worldclim <- read_csv('/groups/nordborg/user/pieter.clauw/Documents/Source/Accessions/2029_modified_MN_SH_wc2.0_30s_bilinear.csv')
+#clim <- read_csv('/Volumes/nordborg/user/pieter.clauw/Documents/Source/Accessions/araclim.csv')
+meta <- read_csv('/groups/nordborg/user/pieter.clauw/Documents/Source/Accessions/A.thaliana_master_accession_list_011215.csv')
+```
+
+```{r preparations}
+growthClim <- inner_join(growth, worldclim, by = c('acn' = 'accession')) %>%
+  filter(acn != 7471) %>%
+  select(names(growth), tavg_10_11_12, -beta_6C, -beta_16C)
+```
+
+
+```{r r VS autumn temperature}
+r_16C <- ggplot(growthClim, aes(x = tavg_10_11_12, y =r_16C)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = F) +
+  stat_cor(method = "pearson") +
+  labs(title = '16°C', x = 'autumn temperature (°C)', y = 'r')
+
+r_6C <- ggplot(growthClim, aes(x = tavg_10_11_12, y =r_6C)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = F) +
+  stat_cor(method = "pearson") +
+  labs(title = '6°C', x = 'autumn temperature (°C)', y = 'r')
+
+r_respSlope <- growthClim %>%
+  select(acn, r_6C, r_16C) %>%
+  pivot_longer(cols = contains('_'), names_to = 'temperature', names_prefix = 'r_', values_to = 'r') %>%
+  ggplot(aes(x = temperature, y = r, group = acn)) +
+  geom_line(aes(col = as.factor(acn))) +
+  theme(legend.position = 'none') +
+  labs(title = 'response curve')
+
+r_resp <- ggplot(growthClim, aes(x = tavg_10_11_12, y =r_resp)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = F) +
+  stat_cor(method = "pearson") +
+  labs(title = 'temperature response', x = 'autumn temperature (°C)', y = 'response slope')
+
+pdf('Results/Growth/Plots/r_Vs_autumnTemperature.pdf')
+ggarrange(r_16C, r_6C, r_respSlope, r_resp)
+dev.off()
+
+```
+
+```{r M0 vs autumn temperature}
+M0_16C <- ggplot(growthClim, aes(x = tavg_10_11_12, y =M0_16C)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = F) +
+  stat_cor(method = "pearson") +
+  labs(title = '16°C', x = 'autumn temperature (°C)', y = 'M0')
+
+M0_6C <- ggplot(growthClim, aes(x = tavg_10_11_12, y =M0_6C)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = F) +
+  stat_cor(method = "pearson") +
+  labs(title = '6°C', x = 'autumn temperature (°C)', y = 'M0')
+
+pdf('Results/Growth/Plots/M0_Vs_autumnTemperature.pdf')
+ggarrange(M0_16C, M0_6C)
+dev.off()
+
+```
+
+
+
+
