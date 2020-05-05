@@ -13,19 +13,19 @@ library(nlme)
 library(viridis)
 library(itsadug)
 library(tidyverse)
-library(wesanderson)
+#library(wesanderson)
 knitr::opts_knit$set(root.dir = "/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/")
 ```
 
 
 ```{r data}
 # estimated marginal means fron mixed nmodel
-growth <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/lemna_DAS_allReps_NO_logRosette_emmeans_V3_CorCAR1_correct.txt', header = T)
-lemna <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Growth/rawdata_combined_annotation_NO.txt', header = T, sep = '\t')
-autumnTemp <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/QandD2/Results/Growth/meanAutumnTemperatureCLusters.txt', head = T)
+growth <- read.table('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/lemna_DAS_allReps_NO_logRosette_emmeans_V3_CorCAR1_correct.txt', header = T)
+lemna <- read.table('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Growth/rawdata_combined_annotation_NO.txt', header = T, sep = '\t')
+autumnTemp <- read.table('/groups/nordborg/user/pieter.clauw/Documents/Experiments/QandD2/Results/Growth/meanAutumnTemperatureCLusters.txt', head = T)
 # models
-baseModel <- get(load("/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/poly3_logRosette_NO_allReps_V3_corCAR1_correct.rda"))
-expFixed <- get(load("/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/poly3_logRosette_NO_allReps_V3_corCAR1_expFixed.rda"))
+baseModel <- get(load("/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/poly3_logRosette_NO_allReps_V3_corCAR1_correct.rda"))
+expFixed <- get(load("/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/poly3_logRosette_NO_allReps_V3_corCAR1_expFixed.rda"))
 
 
 ```
@@ -146,9 +146,52 @@ However, be cautious about the statistics here.
 
 
 ## Growth over time
+```{r rosete area over time}
+minArea <- exp(min(growth$emmean))
+maxArea <- exp(max(growth$emmean))
+# plot temperatures separately
+for (t in temperatures)
+{
+  minArea.t <- exp(min(growth$emmean[growth$temp == t]))
+  maxArea.t <- exp(max(growth$emmean[growth$temp == t]))
+  pdf(paste('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/Plots/Area_overtime_tempclustCol_', t, '.pdf', sep = ''), height = 5, width = 14, useDingbats = FALSE)
+  plot(NA, NA, xlim = c(minDAS, maxDAS), ylim = c(minArea.t, maxArea.t), xlab = 'DAS (days after stratification)', ylab = 'rosette area')
+  for (a in accessions)
+  {
+    growth.t.a <- growth[growth$temp == t & growth$acn == a, ]
+    col = unique(growth.t.a$autumnTempCol)
+    lines(growth.t.a$DAS, exp(growth.t.a$emmean), col = col)
+  }
+  #legend('topleft', legend =legend.df$cluster, col = legend.df$col, lty = 1, bty = 'n')
+  gradientLegend(valRange = autumnTemp.legend$autumnTemp, color = autumnTemp.legend$autumnTempCol, pos = 0.15, side = 3, inside = T, pos.num = 1, n.seg = 4)
+  #text(x= 16.5, y = 10.65, labels = expression(paste('autumn temperature (',degree~C,')')))
+  dev.off()
+}
+
+# plot temperatures together
+pdf('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/Plots/Area_overtime_tempclustCol_16C_6C.pdf', height = 5, width = 14, useDingbats = FALSE)
+plot(NA, NA, xlim = c(minDAS, maxDAS), ylim = c(minArea, maxArea), xlab = 'DAS (days after stratification)', ylab = 'rosette area')
+for (t in temperatures)
+{
+  
+  for (a in accessions)
+  {
+    growth.t.a <- growth[growth$temp == t & growth$acn == a, ]
+    col = unique(growth.t.a$autumnTempCol)
+    lty = visTemp$tempLty[visTemp$temperature == t]
+    lines(growth.t.a$DAS, exp(growth.t.a$emmean), col = col, lty = lty)
+  }
+}
+gradientLegend(valRange = autumnTemp.legend$autumnTemp, color = autumnTemp.legend$autumnTempCol, pos = 0.15, side = 3, inside = T, pos.num = 1, n.seg = 4)
+text(x= 16.5, y = 10.65, labels = expression(paste('autumn temperature (',degree~C,')')))
+legend(x = 13.5, y = 10, legend = visTemp$temperature, lty = visTemp$tempLty,bty = 'n')
+dev.off()
+
+```
 
 
-```{r rosette area over time 16vs6C}
+
+```{r log rosette area over time 16vs6C}
 minArea <- min(growth$emmean)
 maxArea <- max(growth$emmean)
 # plot temperatures separately
