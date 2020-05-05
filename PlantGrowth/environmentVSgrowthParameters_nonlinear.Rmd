@@ -1,0 +1,416 @@
+---
+title: "environment"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(tidyverse)
+library(glmnet)
+library(glinternet)
+library(caret)
+library(leaps)
+library(ggfortify)
+knitr::opts_knit$set(root.dir = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/')
+```
+
+## Environmental correlations with growth
+
+
+```{r Data}
+# growth data
+growth <- read_csv('Results/Growth/nonlinear/modelParameters.csv')
+# worldclim data
+worldclim <- read_csv('/groups/nordborg/user/pieter.clauw/Documents/Source/Accessions/2029_modified_MN_SH_wc2.0_30s_bilinear.csv')
+#clim <- read_csv('/Volumes/nordborg/user/pieter.clauw/Documents/Source/Accessions/araclim.csv')
+meta <- read_csv('/groups/nordborg/user/pieter.clauw/Documents/Source/Accessions/A.thaliana_master_accession_list_011215.csv')
+```
+```{r general variables}
+temperatures <- c('16C', '6C')
+phenotypes <- c('M0', 'r')
+
+acns.SWE <- growth$accession[growth$accession %in% meta$id[meta$country == 'SWE']]
+```
+
+```{r tidying}
+#clim %>%
+#  mutate(autumnTemp = rowMeans(select(., tmean_10, tmean_11, tmean_12)))
+
+growth.long <- growth %>%
+  filter(growth$acn != 7471) %>%
+  pivot_longer(
+    cols = contains('_'),
+    names_to = c(".value", "temperature"),
+    names_sep = '_') %>%
+  filter(temperature %in% c('6C', '16C', 'resp')) %>%
+  select(accession = acn, everything(), -beta)
+
+growthClim <- inner_join(growth.long, worldclim, by = 'accession') %>%
+  select(accession, M0, r, temperature, everything())
+```
+
+```{r correlations}
+growthClim.cor <- data.frame(
+  phenotype = rep(phenotypes, each = ((length(colnames(worldclim)[-1])) * (length(c(temperatures, 'resp'))))),
+  temperature = rep(rep(c(temperatures, 'resp'), each = length(colnames(worldclim)[-1])), length(phenotypes)),
+  climateVariable = rep(colnames(worldclim)[-1], length(phenotypes) * (length(temperatures) + 1)),
+  pvalue = NA,
+  cor = NA)
+
+for (pheno in phenotypes)
+{
+  for (temp in c(temperatures, 'resp'))
+  {
+    for (cv in colnames(worldclim)[-1])
+    {
+      cor.data <- growthClim %>%
+        filter(temperature == temp) %>%
+        select(!!pheno, !!cv) %>%
+        as.data.frame()
+      
+      cor.rslt <- cor.test(cor.data[,1], cor.data[,2])
+      
+      growthClim.cor$pvalue[growthClim.cor$phenotype == pheno & growthClim.cor$temperature == temp & growthClim.cor$climateVariable == cv] <- cor.rslt$p.value
+      growthClim.cor$cor[growthClim.cor$phenotype == pheno & growthClim.cor$temperature == temp & growthClim.cor$climateVariable == cv] <- cor.rslt$estimate
+    }
+  }
+}
+write_csv(growthClim.cor, 'Results/Growth/Environment/correlations_nonlinearGrowth_worldclim.csv')
+```
+
+```{r lasso seasonal data}
+clim.vars.season <- colnames(worldclim)[grepl('.*_[0,1][0-9]_[0,1][0-9]', colnames(worldclim))]
+lasso.clim.season <- data.frame(phenotype = character(), temperature = character(), name = character(), coefficient = numeric())
+
+for (pheno in phenotypes)
+{
+  nonPheno <- phenotypes[phenotypes != pheno]
+  for (temp in c(temperatures, 'resp'))
+  {
+    x <- growthClim %>%
+      filter(temperature == temp) %>%
+      select(pheno, clim.vars.season, -accession, -nonPheno, -temperature, -longitude, -latitude) %>%
+      model.matrix(formula(.[[pheno]] ~ .), data = .)
+    x <- x[,-c(1,2)]
+    
+    y <- growthClim %>%
+      filter(temperature == temp) %>%
+      select(pheno) %>%
+      .[[pheno]]
+    
+    # find optimal lambda
+    cv.out <- cv.glmnet(x,y, alpha = 1)
+    plot(cv.out)  
+    lambda.min <- cv.out$lambda.min
+    # save significant coefficients
+    coef.temp <- coef(cv.out, s = lambda.min)
+    lasso.clim.season <- lasso.clim.season %>%
+      bind_rows(data.frame(phenotype = pheno, temperature = temp, name = coef.temp@Dimnames[[1]][coef.temp@i + 1], coefficient = coef.temp@x))  
+    
+
+  }
+}
+write_csv(lasso.clim.season, 'Results/Growth/Environment/lasso_clim_season_nonlinearGrowth.csv')
+```
+
+```{r elastic net}
+clim.vars.season <- colnames(worldclim)[grepl('.*_[0,1][0-9]_[0,1][0-9]', colnames(worldclim))]
+
+set.seed(42)
+cv_10 = trainControl(method = "cv", number = 10)
+
+# data prep
+data_elnet <- growthClim %>%
+      filter(temperature == 'response') %>%
+      select(LGR, clim.vars.season, -accession, -rosette35DAS, -temperature, -longitude, -latitude)
+
+# no interactions
+lgr_elnet = train(
+  LGR ~ ., data = data_elnet,
+  method = "glmnet",
+  trControl = cv_10
+)
+
+
+# interactions
+lgr_elnet = train(
+  LGR ~ . ^2, data = data_elnet,
+  method = "glmnet",
+  trControl = cv_10
+)
+
+lgr_elnet
+
+# elastic net for interactions
+x <- growthClim %>%
+      filter(temperature == 'response') %>%
+      select(LGR, clim.vars.season, -accession, -rosette35DAS, -temperature, -longitude, -latitude) %>%
+      model.matrix(LGR ~ .^2, data = .)
+x <- x[,-c(1,2)]
+    
+    y <- growthClim %>%
+      filter(temperature == 'response') %>%
+      select(pheno) %>%
+      .[[pheno]]
+
+
+fit_lasso_cv = cv.glmnet(x, y, alpha = 0.55)
+sqrt(fit_lasso_cv$cvm[fit_lasso_cv$lambda == fit_lasso_cv$lambda.min]) # CV-RMSE minimum
+
+    # find optimal lambda
+    cv.out <- cv.glmnet(x,y, alpha = 0.55)
+    plot(cv.out)  
+    lambda.min <- cv.out$lambda.min
+    # save significant coefficients
+    coef.temp <- coef(cv.out, s = lambda.min)
+    lasso.clim.season.SWE <- lasso.clim.season.SWE %>%
+      bind_rows(data.frame(phenotype = pheno, temperature = temp, name = coef.temp@Dimnames[[1]][coef.temp@i + 1], coefficient = coef.temp@x))  
+
+
+
+```
+
+```{r PCA}
+clim.vars.season <- colnames(worldclim)[grepl('.*_[0,1][0-9]_[0,1][0-9]', colnames(worldclim))]
+
+for (pheno in phenotypes)
+{
+  nonPheno <- phenotypes[phenotypes != pheno]
+  for (temp in c(temperatures, 'response'))
+  {
+      growthClim.temp.pheno <- growthClim %>%
+      filter(temperature == temp) %>%
+      select(-accession, -nonPheno, -temperature, -longitude, -latitude) %>%
+      select(pheno, contains('srad'), contains('bio'))
+      
+      clim.pca <- prcomp(growthClim.temp.pheno[,-1])
+    
+      print(autoplot(clim.pca, data = growthClim.temp.pheno, colour = pheno, loadings = T, loadings.label = T))
+  }
+}
+
+
+
+
+
+```
+
+
+```{r lasso seasonal SWE}
+clim.vars.season <- colnames(worldclim)[grepl('.*_[0,1][0-9]_[0,1][0-9]', colnames(worldclim))]
+lasso.clim.season.SWE <- data.frame(phenotype = character(), temperature = character(), name = character(), coefficient = numeric())
+
+for (pheno in phenotypes)
+{
+  nonPheno <- phenotypes[phenotypes != pheno]
+  for (temp in c(temperatures, 'response'))
+  {
+    x <- growthClim %>%
+      filter(temperature == temp) %>%
+      filter(accession %in% acns.SWE) %>%
+      select(pheno, clim.vars.season, -accession, -nonPheno, -temperature, -longitude, -latitude) %>%
+      model.matrix(formula(.[[pheno]] ~ .), data = .)
+    x <- x[,-c(1,2)]
+    
+    y <- growthClim %>%
+      filter(temperature == temp) %>%
+      filter(accession %in% acns.SWE) %>%
+      select(pheno) %>%
+      .[[pheno]]
+    
+    # find optimal lambda
+    cv.out <- cv.glmnet(x,y, alpha = 1)
+    plot(cv.out)  
+    lambda.min <- cv.out$lambda.min
+    # save significant coefficients
+    coef.temp <- coef(cv.out, s = lambda.min)
+    lasso.clim.season.SWE <- lasso.clim.season.SWE %>%
+      bind_rows(data.frame(phenotype = pheno, temperature = temp, name = coef.temp@Dimnames[[1]][coef.temp@i + 1], coefficient = coef.temp@x))  
+  }
+}
+```
+
+
+
+```{r lasso monthly data}
+# do this for each temperature and for each phenotype (LGR and rosette area)
+clim.vars.month <- colnames(worldclim)[grepl('^[a-z]*_[0,1][0-9]$', colnames(worldclim))]
+lasso.clim.month <- data.frame(phenotype = character(), temperature = character(), name = character(), coefficient = numeric())
+for (pheno in phenotypes)
+{
+  nonPheno <- phenotypes[phenotypes != pheno]
+  for (temp in c(temperatures, 'response'))
+  {
+    
+    x <- growthClim %>%
+      filter(temperature == temp) %>%
+      select(pheno, clim.vars.month, -accession, -nonPheno, -temperature, -longitude, -latitude) %>%
+      model.matrix(formula(.[[pheno]] ~ .), data = .)
+    x <- x[,-c(1,2)]
+    
+#growthClim %>%
+#  filter(temperature == temp) %>%
+#  select(LGR, autumnTemp:tmin_9) %>%
+#  model.matrix(LGR ~ ., data = .)
+  
+     y <- growthClim %>%
+      filter(temperature == temp) %>%
+      select(pheno) %>%
+      .[[pheno]]
+
+    # find optimal lambda
+    cv.out <- cv.glmnet(x,y, alpha = 1)
+    plot(cv.out)  
+    lambda.min <- cv.out$lambda.min
+    # save significant coefficients
+    coef.temp <- coef(cv.out, s = lambda.min)
+    lasso.clim.month <- lasso.clim.month %>%
+      bind_rows(data.frame(phenotype = pheno, temperature = temp, name = coef.temp@Dimnames[[1]][coef.temp@i + 1], coefficient = coef.temp@x))  
+  }
+}
+write_csv(lasso.clim.month, 'Results/Growth/Environment/lasso_clim_month.csv')
+```
+
+```{r lasso}
+# do this for each temperature and for each phenotype (LGR and rosette area)
+lasso.clim <- data.frame(phenotype = character(), temperature = character(), name = character(), coefficient = numeric())
+for (pheno in phenotypes)
+{
+  nonPheno <- phenotypes[phenotypes != pheno]
+  for (temp in c(temperatures, 'response'))
+  {
+    
+    x <- growthClim %>%
+      filter(temperature == temp) %>%
+      select(pheno, everything(), -accession, -nonPheno, -temperature, -longitude, -latitude) %>%
+      model.matrix(formula(.[[pheno]] ~ .), data = .)
+    x <- x[,-c(1,2)]
+    
+#growthClim %>%
+#  filter(temperature == temp) %>%
+#  select(LGR, autumnTemp:tmin_9) %>%
+#  model.matrix(LGR ~ ., data = .)
+  
+     y <- growthClim %>%
+      filter(temperature == temp) %>%
+      select(pheno) %>%
+      .[[pheno]]
+
+    # find optimal lambda
+    cv.out <- cv.glmnet(x,y, alpha = 1)
+    plot(cv.out)  
+    lambda.min <- cv.out$lambda.min
+    # save significant coefficients
+    coef.temp <- coef(cv.out, s = lambda.min)
+    lasso.clim <- lasso.clim %>%
+      bind_rows(data.frame(phenotype = pheno, temperature = temp, name = coef.temp@Dimnames[[1]][coef.temp@i + 1], coefficient = coef.temp@x))  
+  }
+}
+write_csv(lasso.clim, 'Results/Growth/Environment/lasso_clim.csv')
+```
+
+
+
+```{r find NA accessions}
+naclim <- growthClim %>%
+  filter(temperature == temp) %>%
+  select(accession, contains('WC'))
+```
+
+
+```{r stepwise regression}
+for (pheno in phenotypes)
+{
+  nonPheno <- phenotypes[phenotypes != pheno]
+  for (temp in c(temperatures, 'response'))
+  {
+# Set seed for reproducibility
+set.seed(123)
+
+      x <- growthClim %>%
+        filter(temperature == temp) %>%
+        select(pheno, everything(), -nonPheno, -accession, -nonPheno, -temperature, -longitude, -latitude)
+      
+      
+      %>%
+        select_if(~ !any(is.na(.)))
+    
+    # Set up repeated k-fold cross-validation
+    train.control <- trainControl(method = "cv", number = 20)
+# Train the model
+    step.model <- train(LGR ~., data = x,
+                    method = "leapSeq", 
+                    tuneGrid = data.frame(nvmax = 1:10),
+                    trControl = train.control
+                    )
+step.model$results
+step.model$bestTune
+summary(step.model$finalModel)
+  }
+}
+```
+
+
+
+
+
+```{r glinternet}
+for (pheno in phenotypes)
+{
+  for (temp in c(temperatures, 'response'))
+  {
+    if (temp == 'response' & pheno == 'rosette35DAS'){next()}
+    y <- growthClim %>%
+      filter(temperature == temp) %>%
+      select(pheno) %>%
+      .[[pheno]]
+
+    # define numeric variables
+    numVar <- growthClim %>%
+      filter(temperature == temp) %>%
+      select(autumnTemp:tmin_9) %>%
+      sapply(., is.numeric)
+
+    # set number of levels for each variable (1 for continuous variables)
+    numLevels <- growthClim %>%
+      filter(temperature == temp) %>%
+      select(autumnTemp:tmin_9) %>%
+      mutate_if(!(numVar), as.factor) %>%
+      sapply(nlevels)
+    numLevels[numLevels == 0] <- 1
+
+    # specify x matrix
+    x <- growthClim %>%
+      filter(temperature == temp) %>%
+      select(autumnTemp:tmin_9)
+      mutate_if(!(numVar), as.factor) %>%
+      mutate_if(is.factor, as.integer) %>%
+      mutate_if(!(numVar), function(x)(x -1))
+
+
+    # specify pairwise interactions
+    tempIdx <- which(colnames(x) == 'temperature')
+    interactionPairs <- matrix(c(rep(tempIdx, ncol(x) - tempIdx), c((tempIdx + 1):ncol(x))), ncol = 2)
+  
+
+    # find optimal lambda
+    set.seed(19)
+    cv_fit <- glinternet.cv(x, y, numLevels, nLambda = 100, numCores = 8)
+    #cv_fit <- glinternet.cv(x, y, numLevels, nFolds = 10, nLambda = 10000)
+    plot(cv_fit)
+    lambda.min.idx <- which(cv_fit$lambda == cv_fit$lambdaHat)
+
+    # coefficents
+    ## main
+    coefs <- coef(cv_fit$glinternetFit)[[lambda.min.idx]]
+    idx_cat <- (1:length(numVar))[!numVar]
+    names(numLevels)[idx_cat[coefs$mainEffects$cat]]
+    idx_num <- (1:length(numVar))[numVar]
+    names(numLevels)[idx_num[coefs$mainEffects$cont]]
+    ## interactions
+    
+}
+}
+```
+

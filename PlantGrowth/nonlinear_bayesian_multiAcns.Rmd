@@ -144,11 +144,11 @@ fit_16C_acns.c <- brm(
   cores = 4
   )
 
-save(fit_16C_acns.c, file = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit_16C_acns.c.rda')
+save(fit_16C_acns.c, file = 'Results/Growth/nonlinear/fit_16C_acns.c.rda')
 
-summary(fit_16C_acn.c)
-plot(fit_16C_acn.c)
-plot(conditional_effects(fit_16C_acn.c), points = TRUE)
+summary(fit_16C_acns.c)
+plot(fit_16C_acns.c)
+plot(conditional_effects(fit_16C_acns.c), points = TRUE)
 ```
 
 
