@@ -19,6 +19,8 @@ VCF=$(sed -n ${i}p $VCFlst)
 OUT=${VCF/1001genomes_snp-short-indel_only_ACGTN/pseudogenomes/pseudoTAIR10}
 OUT=${OUT/.vcf/.fasta}
 
+mkdir -p ${maibnDir}pseudogenomes/
+
 # MAKE PSEUDO GENOMES #
 python $PSEUDOGENIZE -O $OUT $FASTA $VCF
 
