@@ -63,7 +63,7 @@ for (i in 1:nrow(model.par))
 {
   temp <- model.par$temperature[i]
   acn <- model.par$acn[i]
-  fxeff <- fixef(fit.nlme[[temp]])
+  fxeff <- fixef(fit.nlme[[as.character(temp)]])
   
   model.par$M0[i] <- sum(c(fxeff['M0.(Intercept)'],fxeff[paste('M0.acn', acn, sep = '')]), na.rm = T)
   model.par$r[i] <- sum(c(fxeff['r.(Intercept)'], fxeff[paste('r.acn', acn, sep = '')]), na.rm = T)
@@ -103,16 +103,38 @@ ggarrange(M0, r, common.legend = T, legend = 'right')
 dev.off()
 ```
 
-```{r output}
+```{r make wide}
 # transform tibble to wide format -> compatible for GWAS
 model.par.wide <- model.par %>%
   pivot_wider(id_cols = acn,
               names_from = temperature,
-              values_from = c(M0, M0_log, r, r_rel, beta),
+              values_from = c(M0, M0_log, r, r_rel, r_rel_log, beta),
               names_sep = '_')
 
-write_csv(model.par.wide, path = 'Results/Growth/nonlinear/modelParameters.csv')
+```
 
+```{r response curves}
+resp.curve <- function(pheno_6C, pheno_16C)
+{
+  pheno <- tibble('X_6C' = pheno_6C, 'X_16C' = pheno_16C) %>%
+    pivot_longer(cols = starts_with('X'), names_to = 'temperature', names_prefix = 'X_', values_to = 'pheno')
+  fit <- lm(pheno ~ temperature, data = pheno)
+  resp <- as.numeric(fit$coefficients[2])
+  return(resp)
+}
+
+model.par.wide$M0_resp <- unlist(mapply(model.par.wide$M0_6C, model.par.wide$M0_16C, FUN = resp.curve))
+model.par.wide$M0_log_resp <- unlist(mapply(model.par.wide$M0_log_6C, model.par.wide$M0_log_16C, FUN = resp.curve))
+model.par.wide$r_resp <- unlist(mapply(model.par.wide$r_6C, model.par.wide$r_16C, FUN = resp.curve))
+model.par.wide$r_rel_resp <- unlist(mapply(model.par.wide$r_rel_6C, model.par.wide$r_rel_16C, FUN = resp.curve))
+model.par.wide$r_rel_log_resp <- unlist(mapply(model.par.wide$r_rel_log_6C, model.par.wide$r_rel_log_16C, FUN = resp.curve))
+```
+
+
+```{r output}
+# move beta to the back of df
+model.par.wide <- select(model.par.wide, -beta_6C, -beta_16C, beta_6C, beta_16C)
+write_csv(model.par.wide, path = 'Results/Growth/nonlinear/modelParameters.csv')
 ```
 
 
