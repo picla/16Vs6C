@@ -1,0 +1,544 @@
+---
+title: "nonlinear_bayesian"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(tidyverse)
+library(brms)
+library(ggpubr)
+knitr::opts_knit$set(root.dir = "/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/")
+```
+
+
+```{r data}
+lemna <- read_delim('Data/Growth/rawdata_combined_annotation_NO.txt', delim = '\t')
+linear_params <- read_csv('Results/Growth/nonlinear/modelParameters.csv')
+```
+```{r preparation}
+# data preparation #
+lemna$ID <- paste(lemna$pot, lemna$experiment, sep = '_')
+lemna$acn <- as.character(lemna$acn)
+lemna$Area[lemna$Area == 0] <- NA
+
+# only use accessions which have data for all replicates
+acns_rep1 <- unique(lemna$acn[lemna$replicate == 'rep1'])
+acns_rep2 <- unique(lemna$acn[lemna$replicate == 'rep2'])
+acns_rep3 <- unique(lemna$acn[lemna$replicate == 'rep3'])
+
+acns_rep123 <- intersect(intersect(acns_rep2, acns_rep3), acns_rep1)
+lemna <- lemna[lemna$acn %in% acns_rep123, ]
+
+# subset #
+lemna.sub <- lemna %>%
+  drop_na(Area) %>%
+  mutate(
+         ID,
+         acn = as.factor(acn),
+         experiment = as.factor(experiment),
+         temperature = as.factor(temperature),
+         replicate = as.factor(replicate),
+         DAS_decimal = DAS_decimal - 14,
+         DAS = floor(DAS_decimal),
+         Area) %>%
+  select(ID, acn, experiment, temperature, replicate, DAS_decimal, DAS, Area)
+
+lemna.16C <- filter(lemna.sub, temperature == '16C')
+lemna.6C <- filter(lemna.sub, temperature == '6C')
+```
+
+```{r priors}
+median(linear_params$M0_16C)
+sd(linear_params$M0_16C)
+
+mean(linear_params$r_16C)
+sd(linear_params$r_16C)
+
+unique(linear_params$beta_16C)
+0.1
+  
+prior.16C.M0 <- prior(normal(1070.201, 1000), nlpar = 'M0')
+prior.16C.r <- prior(normal(0.2585077, 0.05), nlpar = 'r')
+prior.16C.beta <- prior(normal(0.9542722, 0.3), nlpar = 'beta')
+```
+
+```{r prepare for  16C per accession}
+acn <- unique(lemna.16C$acn)[1]
+lemna.16C.a <- filter(lemna.16C, acn == !!acn)
+ggplot(lemna.16C.a, aes(x = DAS_decimal, y = Area, group = ID)) +
+  geom_line(aes(col = replicate))
+```
+```{r fit _16C_acn.a}
+# new priors
+prior.16C.M0 <- prior(normal(2716.43, 247.89), nlpar = 'M0')
+prior.16C.r <- prior(normal(0.31, 0.05), nlpar = 'r')
+prior.16C.beta <- prior(normal(0.92, 0.02), nlpar = 'beta')
+
+
+fit_16C_acn.a <- brm(
+  bf(Area ~ (M0^(1 - beta) + r * DAS_decimal * (1 - beta))^(1 / (1 - beta)),
+     M0 ~ 1, r ~ 1, beta ~ 1,
+     nl = T),
+  data = lemna.16C.a,
+  prior = c(
+    prior.16C.M0,
+    prior.16C.r,
+    prior.16C.beta),
+  cores = 4
+  )
+
+summary(fit_16C_acn.a)
+plot(fit_16C_acn.a)
+plot(conditional_effects(fit_16C_acn.a), points = TRUE)
+```
+```{r fit _16C_acn.a_ar}
+# new priors
+prior.16C.M0 <- prior(normal(2716.43, 247.89), nlpar = 'M0')
+prior.16C.r <- prior(normal(0.31, 0.05), nlpar = 'r')
+prior.16C.beta <- prior(normal(0.92, 0.02), nlpar = 'beta')
+
+
+fit_16C_acn.a_ar <- brm(
+  bf(Area ~ (M0^(1 - beta) + r * DAS_decimal * (1 - beta))^(1 / (1 - beta)),
+     M0 ~ 1, r ~ 1, beta ~ 1,
+     autocor = ~ ar(time = DAS_decimal, gr = ID, p = 5),
+     nl = T),
+  data = lemna.16C.a,
+  prior = c(
+    prior.16C.M0,
+    prior.16C.r,
+    prior.16C.beta),
+  cores = 4
+  )
+
+summary(fit_16C_acn.a_ar)
+plot(fit_16C_acn.a_ar, ask = F)
+plot(conditional_effects(fit_16C_acn.a_ar), points = TRUE)
+```
+```{r fit_16C_acn.b}
+fit_16C_acn.b <- brm(
+  bf(Area ~ (M0^(1-beta) + r*DAS_decimal*(1-beta))^(1/(1-beta)),
+     M0 ~ 1 + (1|replicate), r ~ 1, beta ~ 1,
+     nl = T),
+  data = lemna.16C.a,
+  prior = c(
+    prior.16C.M0,
+    prior.16C.r,
+    prior.16C.beta),
+  cores = 4,
+  control = list(adapt_delta = 0.9),
+  iter = 3000
+  )
+
+summary(fit_16C_acn.b)
+plot(fit_16C_acn.b)
+plot(conditional_effects(fit_16C_acn.b), points = TRUE)
+pairs(fit_16C_acn.b)
+
+```
+```{r fit_16C_acn.c}
+fit_16C_acn.c <- brm(
+  bf(Area ~ (M0^(1-beta) + r*DAS_decimal*(1-beta))^(1/(1-beta)),
+     M0 ~ 1 + (1|ID), r ~ 1 + (1|ID), beta ~ 1 ,
+     nl = T),
+  data = lemna.16C.a,
+  prior = c(
+    prior.16C.M0,
+    prior.16C.r,
+    prior.16C.beta),
+  cores = 4,
+  control = list(adapt_delta = 0.99),
+  iter = 40000
+  )
+
+summary(fit_16C_acn.c)
+plot(fit_16C_acn.c)
+plot(conditional_effects(fit_16C_acn.c), points = TRUE)
+```
+```{r fit_16C_acn.c_ar}
+get_prior(
+  bf(Area ~ (M0^(1-beta) + r*DAS_decimal*(1-beta))^(1/(1-beta)),
+     M0 ~ 1 + (1|ID), r ~ 1 + (1|ID), beta ~ 1,
+     autocor = ~ ar(time = DAS_decimal, gr = ID, p = 2),
+     nl = T),
+  data = lemna.16C.a
+)
+
+# piors
+prior.16C.M0 <- prior(normal(1878.55, 300), nlpar = 'M0')
+prior.16C.r <- prior(normal(0.46, 0.05), nlpar = 'r')
+prior.16C.beta <- prior(normal(0.89, 0.02), nlpar = 'beta')
+
+fit_16C_acn.c_ar <- brm(
+  bf(Area ~ (M0^(1-beta) + r*DAS_decimal*(1-beta))^(1/(1-beta)),
+     M0 ~ 1 + (1|ID), r ~ 1 + (1|ID), beta ~ 1,
+     autocor = ~ ar(time = DAS_decimal, gr = ID, p = 2),
+     nl = T),
+  data = lemna.16C.a,
+  prior = c(
+    prior.16C.M0,
+    prior.16C.r,
+    prior.16C.beta),
+  cores = 4,
+  control = list(adapt_delta = 0.999),
+  iter = 80000
+  )
+
+summary(fit_16C_acn.c_ar)
+plot(fit_16C_acn.c_ar, ask = F)
+plot(conditional_effects(fit_16C_acn.c_ar), points = TRUE)
+```
+```{r fit_16C_acn.d_ar}
+# piors
+prior.16C.M0 <- prior(normal(1878.55, 300), nlpar = 'M0')
+prior.16C.r <- prior(normal(0.46, 0.05), nlpar = 'r')
+prior.16C.beta <- prior(normal(0.89, 0.02), nlpar = 'beta')
+
+fit_16C_acn.d_ar <- brm(
+  bf(Area ~ (M0^(1-beta) + r*DAS_decimal*(1-beta))^(1/(1-beta)),
+     M0 ~ 1 + (1|replicate/ID), r ~ 1 + (1|ID), beta ~ 1,
+     autocor = ~ ar(time = DAS_decimal, gr = ID, p = 5),
+     nl = T),
+  data = lemna.16C.a,
+  prior = c(
+    prior.16C.M0,
+    prior.16C.r,
+    prior.16C.beta),
+  cores = 4,
+  control = list(adapt_delta = 0.99),
+  iter = 80000
+  )
+
+summary(fit_16C_acn.d_ar)
+plot(fit_16C_acn.d_ar, ask = F)
+plot(conditional_effects(fit_16C_acn.d_ar), points = TRUE)
+```
+```{r fit_16C_acn.d_ar less samples}
+# piors
+prior.16C.M0 <- prior(normal(1878.55, 300), nlpar = 'M0')
+prior.16C.r <- prior(normal(0.46, 0.05), nlpar = 'r')
+prior.16C.beta <- prior(normal(0.89, 0.02), nlpar = 'beta')
+
+fit_16C_acn.d_ar_less <- brm(
+  bf(Area ~ (M0^(1 - beta) + r * DAS_decimal * (1 - beta))^(1 / (1 - beta)),
+     M0 ~ 1 + (1|replicate/ID), r ~ 1 + (1|ID), beta ~ 1,
+     autocor = ~ ar(time = DAS_decimal, gr = ID, p = 5),
+     nl = T),
+  data = lemna.16C.a,
+  prior = c(
+    prior.16C.M0,
+    prior.16C.r,
+    prior.16C.beta),
+  cores = 4,
+  control = list(adapt_delta = 0.99),
+  iter = 4000
+  )
+
+summary(fit_16C_acn.d_ar_less)
+plot(fit_16C_acn.d_ar_less, ask = F)
+plot(conditional_effects(fit_16C_acn.d_ar_less), points = TRUE)
+```
+```{r fit_16C_acn.e_ar}
+# priors
+prior.16C.M0 <- prior(normal(1878.55, 300), nlpar = 'M0')
+prior.16C.r <- prior(normal(0.46, 0.05), nlpar = 'r')
+prior.16C.beta <- prior(normal(0.89, 0.02), nlpar = 'beta')
+
+fit_16C_acn.e_ar <- brm(
+  bf(Area ~ (M0^(1 - beta) + r * DAS_decimal * (1 - beta))^(1/(1 - beta)),
+     M0 ~ 1 + (1|replicate/ID), r ~ 1 + (1|replicate/ID), beta ~ 1,
+     autocor = ~ ar(time = DAS_decimal, gr = ID, p = 5),
+     nl = T),
+  data = lemna.16C.a,
+  prior = c(
+    prior.16C.M0,
+    prior.16C.r,
+    prior.16C.beta),
+  cores = 4,
+  control = list(adapt_delta = 0.99),
+  iter = 4000
+  )
+
+summary(fit_16C_acn.e_ar)
+plot(fit_16C_acn.e_ar, ask = F)
+plot(conditional_effects(fit_16C_acn.e_ar), points = TRUE)
+```
+
+```{r model comparison}
+loo(fit_16C_acn.a, fit_16C_acn.a_ar)
+kfold(fit_16C_acn.a, fit_16C_acn.a_ar)
+
+```
+TIP: write models with spaces between math operators.
+Otherwise - when running kfold:
+ Error in prep_call_sampler(object) : 
+  could not find function "prep_call_sampler" 
+
+
+
+
+```{r preparations more accessions 16C}
+acns <- unique(lemna.16C$acn)[1:2]
+lemna.16C.a <- filter(lemna.16C, acn %in% acns)
+ggplot(lemna.16C.a, aes(x = DAS_decimal, y = Area, group = ID)) +
+  geom_line(aes(col = acn))
+
+mean(lemna.16C.a$Area[lemna.16C.a$DAS == 0])
+sd(lemna.16C.a$Area[lemna.16C.a$DAS == 0])
+
+prior.16C.M0 <- prior(normal(2791.2, 1049.086), nlpar = 'M0')
+prior.16C.r <- prior(normal(0.31, 0.05), nlpar = 'r')
+prior.16C.beta <- prior(normal(0.95, 0.2), nlpar = 'beta')
+```
+```{r fit_16C_acns.a}
+# priors
+prior.16C.M0 <- prior(normal(2716.43, 247.89), nlpar = 'M0')
+prior.16C.r <- prior(normal(0.31, 0.05), nlpar = 'r')
+prior.16C.beta <- prior(normal(0.92, 0.02), nlpar = 'beta')
+
+fit_16C_acns.a <- brm(
+  bf(Area ~ (M0^(1-beta) + r*DAS_decimal*(1-beta))^(1/(1-beta)),
+     M0 ~ acn, r ~ acn, beta ~ acn,
+     nl = T),
+  data = lemna.16C,
+  prior = c(
+    prior.16C.M0,
+    prior.16C.r,
+    prior.16C.beta),
+  cores = 4
+  )
+
+save(fit_16C_acns.a, file = 'Results/Growth/nonlinear/fit_16C_acns.a.rda')
+ 
+summary(fit_16C_acns.a)
+plot(fit_16C_acns.a, ask = F)
+plot(conditional_effects(fit_16C_acns.b), points = TRUE, ask = F)
+
+```
+```{r fit_16C_acns.b}
+fit_16C_acns.b <- brm(
+  bf(Area ~ (M0^(1-beta) + r*DAS_decimal*(1-beta))^(1/(1-beta)),
+     M0 ~ acn + (1+acn|ID), r ~ acn, beta ~ 1,
+     nl = T),
+  data = lemna.16C.a,
+  prior = c(
+    prior.16C.M0,
+    prior.16C.r,
+    prior.16C.beta),
+  control = list(adapt_delta = 0.999, max_treedepth = 15),
+  iter = 2000,
+  chains = 8,
+  cores = 8
+  )
+
+save(fit_16C_acns.b, file = 'Results/Growth/nonlinear/fit_16C_acns.b.rda')
+
+summary(fit_16C_acns.b)
+plot(fit_16C_acns.b, ask = F)
+plot(conditional_effects(fit_16C_acns.a), points = TRUE)
+
+```
+```{r fit_16C_acns.c}
+prior.16C.M0 <- prior(normal(2791.2, 1049.086), nlpar = 'M0')
+prior.16C.r <- prior(normal(0.31, 0.05), nlpar = 'r')
+prior.16C.beta <- prior(normal(0.95, 0.2), nlpar = 'beta')
+
+fit_16C_acns.c <- brm(
+  bf(Area ~ (M0^(1-beta) + r*DAS_decimal*(1-beta))^(1/(1-beta)),
+     M0 ~ acn + (1+acn|ID), r ~ acn + (1 + acn|ID), beta ~ 1,
+     nl = T),
+  data = lemna.16C.a,
+  prior = c(
+    prior.16C.M0,
+    prior.16C.r,
+    prior.16C.beta),
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  iter = 4000,
+  chains = 8,
+  cores = 8
+  )
+
+save(fit_16C_acns.c, file = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinearfit_16C_acns.c.rda')
+
+summary(fit_16C_acns.c)
+plot(fit_16C_acns.c, ask = F)
+plot(conditional_effects(fit_16C_acns.c), points = TRUE)
+
+
+```
+```{r fit_16C_acns.d}
+prior.16C.M0 <- prior(normal(2791.2, 1049.086), nlpar = 'M0')
+prior.16C.r <- prior(normal(0.5, 0.2), nlpar = 'r')
+prior.16C.beta <- prior(normal(0.9, 0.2), nlpar = 'beta')
+
+fit_16C_acns.d <- brm(
+  bf(Area ~ (M0^(1-beta) + r*DAS_decimal*(1-beta))^(1/(1-beta)),
+     M0 ~ acn + (1+acn|ID), r ~ acn + (1 + acn|ID), beta ~ 1,
+     nl = T),
+  data = lemna.16C.a,
+  prior = c(
+    prior.16C.M0,
+    prior.16C.r,
+    prior.16C.beta),
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  iter = 4000,
+  chains = 8,
+  cores = 8
+  )
+
+save(fit_16C_acns.d, file = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinearfit_16C_acns.d.rda')
+
+summary(fit_16C_acns.d)
+plot(fit_16C_acns.d, ask = F)
+plot(conditional_effects(fit_16C_acns.c), points = TRUE)
+```
+```{r fit_16C_acns.e}
+prior.16C.M0 <- prior(normal(1100, 200), nlpar = 'M0')
+prior.16C.r <- prior(normal(0.5, 0.2), nlpar = 'r')
+prior.16C.beta <- prior(normal(0.9, 0.2), nlpar = 'beta')
+
+fit_16C_acns.e <- brm(
+  bf(Area ~ (M0^(1-beta) + r*DAS_decimal*(1-beta))^(1/(1-beta)),
+     M0 ~ acn + (1+acn|ID), r ~ acn + (1 + acn|ID), beta ~ 1,
+     nl = T),
+  data = lemna.16C.a,
+  prior = c(
+    prior.16C.M0,
+    prior.16C.r,
+    prior.16C.beta),
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  iter = 4000,
+  chains = 8,
+  cores = 8
+  )
+
+save(fit_16C_acns.e, file = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinearfit_16C_acns.e.rda')
+
+summary(fit_16C_acns.e)
+plot(fit_16C_acns.e, ask = F)
+plot(conditional_effects(fit_16C_acns.e), points = TRUE)
+```
+
+## priors
+M0 priors can be obtained from 
+
+
+
+check if a rough estimate of r can be calculted from the raw data
+```{r r from raw data}
+
+
+
+
+
+
+```
+
+
+
+
+
+
+
+
+```{r model}
+fit_16C.a <- brm(
+  bf(Area ~ (M0^(1-beta) + r*DAS_decimal*(1-beta))^(1/(1-beta)),
+     M0 ~ 1, r ~ 1, beta ~ 1,
+     nl = T),
+  data = lemna.split[[2]],
+  prior = c(
+    prior.16C.M0,
+    prior.16C.r,
+    prior.16C.beta),
+  cores = 4
+  )
+save(fit_16C.a, file = 'Results/Growth/nonlinear/fit_16C.a.brms.rda')
+
+fit_16C.b <- brm(
+  bf(Area ~ (M0^(1-beta) + r*DAS_decimal*(1-beta))^(1/(1-beta)),
+     M0 ~ 1 + (1|ID), r ~ 1 + (1|ID), beta ~ 1 + (1|ID),
+     nl = T),
+  data = lemna.split[[2]],
+  prior = c(
+    prior.16C.M0,
+    prior.16C.r,
+    prior.16C.beta),
+  chains = 8,
+  iter = 1000,
+  cores = 8
+  )
+save(fit_16C.b, file = 'Results/Growth/nonlinear/fit_16C.b.brms.rda')
+
+fit_16C.c <- brm(
+  bf(Area ~ (M0^(1-beta) + r*DAS_decimal*(1-beta))^(1/(1-beta)),
+     M0 ~ acn, r ~ 1 , beta ~ 1 ,
+     nl = T),
+  data = lemna.split[[2]],
+  prior = c(
+    prior.16C.M0,
+    prior.16C.r,
+    prior.16C.beta),
+  chains = 8,
+  iter = 1000,
+  cores = 8
+  )
+save(fit_16C.c, file = 'Results/Growth/nonlinear/fit_16C.c.brms.rda')
+
+fit_16C.d <- brm(
+  bf(Area ~ (M0^(1-beta) + r*DAS_decimal*(1-beta))^(1/(1-beta)),
+     M0 ~ acn, r ~ acn , beta ~ 1 ,
+     nl = T),
+  data = lemna.split[[2]],
+  prior = c(
+    prior.16C.M0,
+    prior.16C.r,
+    prior.16C.beta),
+  chains = 8,
+  iter = 1000,
+  cores = 8
+  )
+save(fit_16C.d, file = 'Results/Growth/nonlinear/fit_16C.d.brms.rda')
+
+fit_16C.e <- brm(
+  bf(Area ~ (M0^(1-beta) + r*DAS_decimal*(1-beta))^(1/(1-beta)),
+     M0 ~ acn + (1 + acn|ID), r ~ acn + (1 + acn|ID) , beta ~ 1 + (1|ID),
+     nl = T),
+  data = lemna.split[[2]],
+  prior = c(
+    prior.16C.M0,
+    prior.16C.r,
+    prior.16C.beta),
+  chains = 4,
+  iter = 1000,
+  cores = 8
+  )
+save(fit_16C.e, file = 'Results/Growth/nonlinear/fit_16C.e.brms.rda')
+
+
+fit_loss <- brm(
+  bf(cum ~ ult * (1 - exp(-(dev/theta)^omega)),
+     ult ~ 1 + (1|AY), omega ~ 1, theta ~ 1, 
+     nl = TRUE),
+  data = loss, family = gaussian(),
+  prior = c(
+    prior(normal(5000, 1000), nlpar = "ult"),
+    prior(normal(1, 2), nlpar = "omega"),
+    prior(normal(45, 10), nlpar = "theta")
+  ),
+  control = list(adapt_delta = 0.9)
+)
+
+
+```
+
+```{r chekc fit_16C.d}
+load('Results/Growth/nonlinear/fit_16C.d.brms.rda')
+summary(fit_16C.d)
+fixef(fit_16C.d)
+plot(fit_16C.d, ask = F)
+plot(conditional_effects(fit_16C.d), points = TRUE)
+```
+
