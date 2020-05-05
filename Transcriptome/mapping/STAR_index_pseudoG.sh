@@ -13,6 +13,10 @@ ml star/2.7.1a-foss-2018b
 i=$SLURM_ARRAY_TASK_ID
 mainDir=/scratch-cbe/users/pieter.clauw/16vs6/Data/Genome/
 pseudoGs=${mainDir}pseudogenomes.txt
+
+ls -d ${mainDir}/pseudogenomes/*.fasta > $pseudoGs
+
+
 FASTA=$(sed -n ${i}p $pseudoGs)
 Indices=${FASTA/.fasta/_STAR_idx/}
 Araport11GTF=${mainDir}Araport11_GFF3_genes_transposons.201606.ChrM_ChrC_FullName.gtf
