@@ -1,6 +1,6 @@
 #!/usr/bin/env bash                                                                                                                                         
 
-#SBATCH --time=30:00:00
+#SBATCH --time=14-00:00:00
 #SBATCH --output Logs/nonlinear_cluster_16C.log
 #SBATCH --mem=60GB
 #SBATCH --nodes=1
