@@ -128,7 +128,7 @@ prior.16C.r <- prior(normal(0.5, 0.5), nlpar = 'r', lb = 0)
 prior.16C.beta <- prior(normal(0.9, 0.1), nlpar = 'beta', lb = 0)
 
 
-fit_16C_acns.b <- brm(
+fit_16C_acns.c <- brm(
   bf(Area.2000px ~ (M0^(1 - beta) + r * DAS_decimal * (1 - beta))^(1 / (1 - beta)),
      M0 ~ 1, r ~ 1, beta ~ 1,
      nl = T),
@@ -140,8 +140,10 @@ fit_16C_acns.b <- brm(
   cores = 4
   )
 
-summary(fit_16C_acn.c)
-plot(fit_16C_acn.c)
-plot(conditional_effects(fit_16C_acn.c), points = TRUE)
+save(fit_16C_acns.c, file = 'Results/Growth/nonlinear/fit_16C_acns.c.rda')
+
+summary(fit_16C_acns.c)
+plot(fit_16C_acns.c)
+plot(conditional_effects(fit_16C_acns.c), points = TRUE)
 ```
 
