@@ -83,9 +83,11 @@ fit_16C_acns.a <- brm(
   cores = 4
   )
 
-summary(fit_16C_acn.a)
-plot(fit_16C_acn.a)
-plot(conditional_effects(fit_16C_acn.a), points = TRUE)
+save(fit_16C_acns.a, file = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit_16C_acns.a.rda')
+
+summary(fit_16C_acns.a)
+plot(fit_16C_acns.a, ask = F)
+plot(conditional_effects(fit_16C_acns.a), points = TRUE)
 ```
 
 
@@ -112,9 +114,11 @@ fit_16C_acns.b <- brm(
   cores = 4
   )
 
-summary(fit_16C_acn.b)
-plot(fit_16C_acn.b)
-plot(conditional_effects(fit_16C_acn.b), points = TRUE)
+save(fit_16C_acns.b, file = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit_16C_acns.b.rda')
+
+summary(fit_16C_acns.b)
+plot(fit_16C_acns.b, ask =F)
+plot(conditional_effects(fit_16C_acns.b), points = TRUE)
 ```
 
 ```{r fit_16C_acns.c}
@@ -128,7 +132,7 @@ prior.16C.r <- prior(normal(0.5, 0.5), nlpar = 'r', lb = 0)
 prior.16C.beta <- prior(normal(0.9, 0.1), nlpar = 'beta', lb = 0)
 
 
-fit_16C_acns.b <- brm(
+fit_16C_acns.c <- brm(
   bf(Area.2000px ~ (M0^(1 - beta) + r * DAS_decimal * (1 - beta))^(1 / (1 - beta)),
      M0 ~ 1, r ~ 1, beta ~ 1,
      nl = T),
@@ -140,8 +144,85 @@ fit_16C_acns.b <- brm(
   cores = 4
   )
 
+save(fit_16C_acns.c, file = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit_16C_acns.c.rda')
+
 summary(fit_16C_acn.c)
 plot(fit_16C_acn.c)
 plot(conditional_effects(fit_16C_acn.c), points = TRUE)
 ```
+
+
+```{r fit_16C_acns.d}
+# new priors
+mean(lemna.16C$Area.2000px[lemna.16C$DAS == 0], na.rm = T)
+sd(lemna.16C$Area.2000px[lemna.16C$DAS == 0], na.rm = T)
+
+
+prior.16C.M0 <- prior(normal(0.80, 0.44), nlpar = 'M0', lb = 0)
+prior.16C.r <- prior(normal(0.5, 0.5), nlpar = 'r', lb = 0)
+prior.16C.beta <- prior(normal(0.9, 0.1), nlpar = 'beta', lb = 0.5)
+
+
+fit_16C_acns.d <- brm(
+  bf(Area.2000px ~ (M0^(1 - beta) + r * DAS_decimal * (1 - beta))^(1 / (1 - beta)),
+     M0 ~ 1, r ~ 1, beta ~ 1,
+     nl = T),
+  data = lemna.16C,
+  prior = c(
+    prior.16C.M0,
+    prior.16C.r,
+    prior.16C.beta),
+  cores = 4
+  )
+
+save(fit_16C_acns.d, file = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit_16C_acns.d.rda')
+
+summary(fit_16C_acns.d)
+plot(fit_16C_acns.d)
+plot(conditional_effects(fit_16C_acns.d), points = TRUE)
+```
+
+
+```{r}
+lemna.16C.t0 <- lemna.16C[lemna.16C$DAS == 0, ]
+
+fit_M0 <- lm(Area.2000px ~ acn, data = lemna.16C.t0)
+summary(fit_M0)
+
+prior.16C.M0 <- prior(normal(0.80, 0.44), nlpar = 'M0', lb = 0)
+prior.16C.r <- prior(normal(0.5, 0.5), nlpar = 'r', lb = 0)
+prior.16C.beta <- prior(normal(0.9, 0.1), nlpar = 'beta', lb = 0.5)
+
+median(lemna.16C.t0$Area.2000px)
+sd(lemna.16C.t0$Area.2000px)
+
+prior.16C.M0 <- set_prior(normal())
+
+
+
+bprior <- set_prior(normal(0.70, 0.44), nlpar = 'M0', coef = Intercept) +
+set_prior(normal(0.11, 0.08), nlpar = 'M0') +
+set_prior(normal(0.5, 0.5), nlpar = 'r', coef = Intercept) +
+set_prior(normal(0, 0.5), nlpar = 'r') +
+set_prior(normal(0.8, 0.1), nlpar = 'beta')
+
+cprior <- prior(normal(0.80, 0.44), nlpar = 'M0', lb = 0) +
+  prior(normal(0.5, 0.5), nlpar = 'r', lb = 0) +
+  prior(normal(0.9, 0.1), nlpar = 'beta', lb = 0.5)
+
+fit_16C_acns.e <- brm(
+  bf(Area.2000px ~ (M0^(1 - beta) + r * DAS_decimal * (1 - beta))^(1 / (1 - beta)),
+     M0 ~ acn, r ~ acn, beta ~ 1,
+     nl = T),
+  data = lemna.16C,
+  prior = cprior,
+  cores = 4
+  )
+
+
+```
+
+
+
+
 
