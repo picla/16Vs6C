@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
 # SLURM
-#SBATCH --mem=20GB
+#SBATCH --mem=40GB
 #SBATCH --output=Logs/multitrait_16vs6_growth_%A_%a.log
-#SBATCH --array=2-7:2
+#SBATCH --array=2-10:2
 
 # ENVIRONMENT #
 ml anaconda3/2019.03
@@ -27,4 +27,3 @@ MTMM=~/GitRepos/GWAStoolbox/Limix/multitrait.py
 
 python $MTMM -p $PHENO -g $GENO -m 0.05 -o $OUT
 
-rm $PHENO
