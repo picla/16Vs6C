@@ -65,10 +65,10 @@ load('Results/Growth/nonlinear/fit2f.nlme.16C.rda')
 
 # model #
 fit2g.nlme.16C <- update(fit2f.nlme.16C,
-                        fixed = list(M0 ~ acn, r ~ acn, beta ~ 1),
+                        fixed = list(M0 + r ~ acn, beta ~ 1),
                         groups = ~ ID,
                         start = fixef(fit2f.nlme.16C),
-                        random = pdDiag(list(M0 ~ replicate, r ~ 1, beta ~ 1)),
+                        random = pdDiag(list(M0 ~ 1 + replicate, r ~ 1, beta ~ 1)),
                         correlation = corCAR1(form =  ~ DAS_decimal),
                         data = lemna.16C,
                         control = ctrl,
