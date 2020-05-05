@@ -263,7 +263,6 @@ fit.lis.6C <- nlsList(Area ~ SS.pow(DAS_decimal, M0, r, beta) | acn,
                      control = ctrl.nls)
 
 n.acns <- length(unique(lemna.6C$acn)) -1
-start.6C <- c(fixef(fit.lis.6C)[1], rep(0, n.acns), fixef(fit.lis.6C)[2], rep(0, n.acns), fixef(fit.lis.6C)[3], rep(0, n.acns))
 
 # CONVERGES
 fit2.nlme.6C <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
@@ -276,7 +275,6 @@ fit2.nlme.6C <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
                     verbose = T)
 save(fit2.nlme.6C, file = '/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit2.nlme.6C.rda')
 
-start.6C <- c(fixef(fit2.nlme.6C)[1], rep(0, n.acns), fixef(fit2.nlme.6C)[2], rep(0, n.acns), fixef(fit2.nlme.6C)[3], rep(0, n.acns))
 # CONVERGES #
 fit3.nlme.6C <- update(fit2.nlme.6C,
                     fixed = list(M0 ~ acn, r + beta ~ 1),
@@ -343,32 +341,36 @@ fit7.nlme <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
                     verbose = T)
 
 
-pdf('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/augPred_fit5_6C.pdf')
+# predict
+DAS_decimal_pred <- c(0:21)
+accessions <- unique(lemna.6C$acn)
+predData <- data.frame(
+  acn = rep(accessions, each = length(DAS_decimal_pred)),
+  DAS_decimal= rep(DAS_decimal_pred, length(accessions)))
+
+predData$fit5 <- predict(fit5.nlme.6C, newdata = predData, level = 0)
+predData$fit4 <- predict(fit4.nlme.6C, newdata = predData, level = 0)
+predData$fit3 <- predict(fit3.nlme.6C, newdata = predData, level = 0)
+
+pdf('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/augPred_fit3_6C.pdf')
 for(acn in accessions)
 {
   predData.a <- predData %>%
     filter(acn == !!acn) %>%
     mutate(DAS_decimal = DAS_decimal + 14)
   
-  lemna.16C.a <- lemna.16C %>%
+  lemna.6C.a <- lemna.6C %>%
     filter(acn == !!acn) %>%
     mutate(DAS_decimal = DAS_decimal + 14)
   
-  print(ggplot(predData.a, aes(DAS_decimal, fit2f)) +
+  print(ggplot(predData.a, aes(DAS_decimal, fit3)) +
     geom_line() +
-    geom_point(data = lemna.16C.a, aes(DAS_decimal, Area, group = replicate)))
+    geom_point(data = lemna.6C.a, aes(DAS_decimal, Area, group = replicate)))
 }
 dev.off()
 
 
-# predict
-DAS_decimal_pred <- c(0:21)
-accessions <- unique(lemna.16C$acn)
-predData <- data.frame(
-  acn = rep(accessions, each = length(DAS_decimal_pred)),
-  DAS_decimal= rep(DAS_decimal_pred, length(accessions)))
 
-predData$fit2f <- predict(fit2f.nlme.16C, newdata = predData, level = 0)
 
 
 # plot raw data
@@ -399,7 +401,7 @@ fit.lis.6C <- nlsList(Area ~ SS.pow(DAS_decimal, M0, r, beta) | acn,
 
 
 # CONVERGES
-fit2.nlme.6C <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
+fit2a.nlme.6C <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
                     fixed = list(M0 ~ 1, r ~ 1, beta ~1),
                     groups = ~ acn,
                     start = c(median(coef(fit.lis.6C)$M0), median(coef(fit.lis.6C)$r), median(coef(fit.lis.6C)$beta)),
@@ -407,7 +409,7 @@ fit2.nlme.6C <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
                     data = lemna.6C,
                     control = ctrl.nlme,
                     verbose = T)
-save(fit2.nlme.6C, file = '~/Documents/GMI/fit2.nlme.6C.rda')
+save(fit2a.nlme.6C, file = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit2a.nlme.6C.rda')
 # CONVERGES
 fit2b.nlme.6C <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
                     fixed = list(M0 ~ acn, r ~ 1, beta ~1),
@@ -417,19 +419,20 @@ fit2b.nlme.6C <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
                     data = lemna.6C,
                     control = ctrl.nlme,
                     verbose = T)
-save(fit2b.nlme.6C, file = '~/Documents/GMI/fit2b.nlme.6C.rda')
+save(fit2b.nlme.6C, file = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit2b.nlme.6C.rda')
 
 # CONVERGES
 fit2c.nlme.6C <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
                     fixed = list(M0 ~ acn, r ~ acn, beta ~1),
                     groups = ~ acn,
                     start = c(fixef(fit2b.nlme.6C)[1:249], fixef(fit2b.nlme.6C)[250], rep(0, n.acns), fixef(fit2b.nlme.6C)[251]),
-                    random = pdBlocked(list(M0 ~ 1, r ~ 1, beta ~1)),
+                    random = pdBlocked(list(M0 ~ 1, r ~ 1, beta ~ 1)),
                     data = lemna.6C,
                     control = ctrl.nlme,
                     verbose = T)
-save(fit2c.nlme.6C, file = '~/Documents/GMI/fit2c.nlme.6C.rda')
+save(fit2c.nlme.6C, file ='/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/fit2c.nlme.6C.rda')
 
+# TRY AGAIN
 fit2d.nlme.6C <- nlme(Area ~ SS.pow(DAS_decimal, M0, r, beta),
                     fixed = list(M0 ~ acn, r ~ acn, beta ~1),
                     groups = ~ ID,
