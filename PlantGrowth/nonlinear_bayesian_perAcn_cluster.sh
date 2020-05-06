@@ -1,10 +1,10 @@
 #!/usr/bin/env bash                                                                                                                                         
 
-#SBATCH --time=2-00:00:00
+#SBATCH --time=08:00:00
 #SBATCH --output Logs/nonlinear_bayesian_perAcn_cluster.log
-#SBATCH --mem=60GB
+#SBATCH --mem=100GB
 #SBATCH --cpus-per-task=4
-#SBATCH --qos=medium
+#SBATCH --qos=short
 #SBATCH --array=0-1
 
 # setup #

@@ -55,21 +55,25 @@ lemna.sub <- lemna.sub %>%
 
 # FUNCTION #
 model.base.acn <- function(lemna.t.a){
+  acn <- unique(lemna.t.a$acn)
   # priors
   # guestimate M0 prior parameters
   M0_mean <- mean(lemna.t.a$Area.2000px[lemna.t.a$DAS == 0])
   M0_sd <- sd(lemna.t.a$Area.2000px[lemna.t.a$DAS == 0])
-  M0_lb <- M0_mean - 1.5 * M0_sd
+  M0_lb <- M0_mean - 1.4 * M0_sd
+  M0_ub <- M0_mean + 1.4 * M0_sd
+  if (M0_lb < 0){M0_lb <- 0}
 
   stan.vars <- c(
     stanvar(M0_mean, name = 'M0_mean'),
     stanvar(M0_sd, name = 'M0_sd'),
-    stanvar(M0_lb, name = 'M0_lb')
+    stanvar(M0_lb, name = 'M0_lb'),
+    stanvar(M0_ub, name = 'M0_ub')
   )
   # set priors  
-  prior.16C.M0 <- prior(normal(M0_mean, M0_sd), nlpar = 'M0', lb = M0_lb)
-  prior.16C.r <- prior(normal(0.5, 0.5), nlpar = 'r', lb = 0)
-  prior.16C.beta <- prior(normal(0.8, 0.1), nlpar = 'beta', lb = 0.5)
+  prior.16C.M0 <- prior(normal(M0_mean, M0_sd), nlpar = 'M0', lb = M0_lb, ub = M0_ub)
+  prior.16C.r <- prior(normal(0.5, 0.5), nlpar = 'r', lb = 0, ub = 1.5)
+  prior.16C.beta <- prior(normal(0.8, 0.1), nlpar = 'beta', lb = 0.5, ub = 1.5)
   
   # model
   fit_acn.t.a <- brm(
@@ -85,14 +89,17 @@ model.base.acn <- function(lemna.t.a){
     control = list(adapt_delta = 0.9),
     stanvars = stan.vars
   )
-  return(fit_acn.t.a)
+  # save results
+  save(fit_acn.t.a, file = paste('/scratch-cbe/users/pieter.clauw/16vs6/Results/Growth/nonlinear/fit.base.',acn, '_', temp, '.rda', sep = ''))
+  rm(fit_acn.t.a)
 }
 
 # RUN #
+# clean memory
+rm(lemna)
+# run model for each accession in temperature
 lemna.fit.base.acn <- group_map(lemna.sub, ~ model.base.acn(.))
 
-# SAVE #
-save(lemna.fit.base.acn, file = paste('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/lemna.fit.base_', temp, '.rda', sep = ''))
 
 
 
