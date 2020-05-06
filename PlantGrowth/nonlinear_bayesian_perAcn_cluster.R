@@ -9,7 +9,8 @@ setwd("/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/")
 
 # DATA #
 lemna <- read_delim('Data/Growth/rawdata_combined_annotation_NO.txt', delim = '\t')
-
+args <- commandArgs(trailingOnly=TRUE)
+temp <- args[1]
 # PREPARATIONS #
 # data preparation #
 lemna$ID <- paste(lemna$pot, lemna$experiment, sep = '_')
@@ -49,7 +50,8 @@ lemna.sub <- lemna.sub %>%
 
 # group by accession and temperature
 lemna.sub <- lemna.sub %>%
-  group_by(temperature, acn)
+  filter(temperature == temp) %>%
+  group_by(acn)
 
 # FUNCTION #
 model.base.acn <- function(lemna.t.a){
@@ -90,7 +92,7 @@ model.base.acn <- function(lemna.t.a){
 lemna.fit.base.acn <- group_map(lemna.sub, ~ model.base.acn(.))
 
 # SAVE #
-save(lemna.fit.base.acn, file = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/lemna.fit.base.rda')
+save(lemna.fit.base.acn, file = paste('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/lemna.fit.base_', temp, '.rda', sep = ''))
 
 
 
