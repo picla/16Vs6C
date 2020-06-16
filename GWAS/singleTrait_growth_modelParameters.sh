@@ -3,7 +3,7 @@
 # SLURM
 #SBATCH --mem=10GB
 #SBATCH --output=Logs/singleTrait_growth_modelParameters_%A_%a.log
-#SBATCH --array=2-16
+#SBATCH --array=2-14
 
 # ENVIRONMENT #
 ml anaconda3/2019.03
