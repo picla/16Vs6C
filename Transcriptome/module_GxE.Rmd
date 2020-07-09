@@ -125,7 +125,7 @@ expr.mod <- expr %>%
          gene = as.factor(gene),
          acnTemp = as.factor(paste(accession, temperature, sep = '_')))
 
-    fit.lme <- lme(expression ~ temperature + accession + temperature:accession,
+    #fit.lme <- lme(expression ~ temperature + accession + temperature:accession,
                    random = ~ 1|experiment/gene,
                    data = expr.mod)
 #fit.lme.r <- lme(expression ~ 1, random = list(~1|accession, ~1|temperature, ~1|acnTemp, ~1|experiment), data = expr.mod)
