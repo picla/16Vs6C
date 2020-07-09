@@ -1,0 +1,140 @@
+---
+title: "moduleGxE"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(tidyverse)
+library(nlme)
+```
+
+```{r data}
+load('/groups/nordborg/pub/forPieter/WGCNA/WGCNA_8acn/Network.RData')
+samples <- read_delim('/groups/nordborg/projects/cegs/16Vs6C/Data/Transcriptome/RawData/samples.txt', delim = '\t')
+```
+```{r preparation}
+samples <- samples %>%
+  filter(Selected == 'yes')
+
+# expression data
+expr <- as_tibble(all.expr$data, rownames = 'sample') %>%
+  select(sample, everything())
+
+# module ID for each gene
+gene.module <- tibble(gene = colnames(expr)[-1], module = all.expr$mergedLabels)
+modules <- sort(unique(gene.module$module))[-1]
+```
+
+
+```{r lme no interaction}
+modG_E.list <- list()
+
+for (mod in modules) {
+  tryCatch({
+    print(mod)
+    # get module epxression data
+    moduleGenes <- gene.module$gene[gene.module$module == mod]
+    expr.mod <- expr %>%
+      select(sample, all_of(moduleGenes)) %>%
+      separate(sample, into = c('temperature', 'accession', 'sampleID'), sep = '_') %>%
+      left_join(., select(samples, sample, replicate), by = c('sampleID' = 'sample')) %>%
+      mutate(experiment = paste(temperature, replicate, sep = '_')) %>%
+      select(accession, temperature, experiment, everything(), -replicate, -sampleID) %>%
+      pivot_longer(cols = starts_with('AT'), names_to = 'gene', values_to = 'expression') %>%
+      mutate(accession = as.factor(accession),
+             temperature = as.factor(temperature),
+             experiment = as.factor(experiment),
+             gene = as.factor(gene))
+    
+    # lme
+    fit.lme <- lme(expression ~ accession + temperature,
+                   random = ~ 1|experiment/gene,
+                   data = expr.mod)
+    fit.lme.aov <- anova(fit.lme)
+    
+    
+   modG_E.list[[mod]] <- tibble(module = mod,
+                            intercept.pval = fit.lme.aov$`p-value`[1],
+                            accession.pval = fit.lme.aov$`p-value`[2],
+                            temperature.pval = fit.lme.aov$`p-value`[3])
+  },  error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+}
+
+modulesG_E <- bind_rows(modG_E.list)
+```
+
+```{r lme interaction}
+modGxE.list <- list()
+
+for (mod in modules) {
+  tryCatch({
+    print(mod)
+    # get module epxression data
+    moduleGenes <- gene.module$gene[gene.module$module == mod]
+    expr.mod <- expr %>%
+      select(sample, all_of(moduleGenes)) %>%
+      separate(sample, into = c('temperature', 'accession', 'sampleID'), sep = '_') %>%
+      left_join(., select(samples, sample, replicate), by = c('sampleID' = 'sample')) %>%
+      mutate(experiment = paste(temperature, replicate, sep = '_')) %>%
+      select(accession, temperature, experiment, everything(), -replicate, -sampleID) %>%
+      pivot_longer(cols = starts_with('AT'), names_to = 'gene', values_to = 'expression') %>%
+      mutate(accession = as.factor(accession),
+             temperature = as.factor(temperature),
+             experiment = as.factor(experiment),
+             gene = as.factor(gene))
+    
+    # lme
+    fit.lme <- lme(expression ~ temperature + accession + temperature:accession,
+                   random = ~ 1|experiment/gene,
+                   data = expr.mod)
+    fit.lme.aov <- anova(fit.lme)
+    
+    
+   modGxE.list[[mod]] <- tibble(module = mod,
+                            intercept.pval = fit.lme.aov$`p-value`[1],
+                            temperature.pval = fit.lme.aov$`p-value`[2],
+                            accession.pval = fit.lme.aov$`p-value`[3],
+                            temperature_accession.pval = fit.lme.aov$`p-value`[4])
+  },  error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+}
+
+modulesGxE <- bind_rows(modGxE.list)
+```
+
+Try varcomp only for model swith significant effects first.
+second only for converging models
+do with lmer (see example code below) full random model.
+https://stats.stackexchange.com/questions/133530/variance-component-analysis-nlme
+
+
+```{r varcomp}
+mod <- 67
+moduleGenes <- gene.module$gene[gene.module$module == mod]
+expr.mod <- expr %>%
+  select(sample, all_of(moduleGenes)) %>%
+  separate(sample, into = c('temperature', 'accession', 'sampleID'), sep = '_') %>%
+  left_join(., select(samples, sample, replicate), by = c('sampleID' = 'sample')) %>%
+  mutate(experiment = paste(temperature, replicate, sep = '_')) %>%
+  select(accession, temperature, experiment, everything(), -replicate, -sampleID) %>%
+  pivot_longer(cols = starts_with('AT'), names_to = 'gene', values_to = 'expression') %>%
+  mutate(accession = as.factor(accession),
+         temperature = as.factor(temperature),
+         experiment = as.factor(experiment),
+         gene = as.factor(gene),
+         acnTemp = as.factor(paste(accession, temperature, sep = '_')))
+
+    fit.lme <- lme(expression ~ temperature + accession + temperature:accession,
+                   random = ~ 1|experiment/gene,
+                   data = expr.mod)
+#fit.lme.r <- lme(expression ~ 1, random = list(~1|accession, ~1|temperature, ~1|acnTemp, ~1|experiment), data = expr.mod)
+fit.lmer.r <- lmer(expression ~ (1|accession) + (1|temperature) + (1|accession:temperature) + (1|experiment:gene), data = expr.mod)
+sum.fit.lmer.r <- summary(fit.lmer.r)
+vc.tab.lmer.r <- as.data.frame(sum.fit.lmer.r$varcor)
+vc.tab.lmer.r$CV <- vc.tab.lmer.r$sdcor*100/mean(expr.mod$expression)
+vc.tab.lmer.r$Perc <- paste(round(vc.tab.lmer.r$vcov/sum(vc.tab.lmer.r$vcov)*100, 2),"%", sep="")
+vc.tab.lmer.r <- vc.tab.lmer.r[,-c(2:3)]
+vc.tab.lmer.r
+```
+
