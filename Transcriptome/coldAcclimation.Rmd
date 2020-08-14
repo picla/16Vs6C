@@ -310,6 +310,7 @@ dds.CBF.acnTemp <- as_tibble(assay(dds.varStab.NB), rownames = 'gene') %>%
   select(gene, sample, accession, temperature, expression) %>%
   group_by(accession, temperature, gene) %>%
   summarise(mean(expression)) %>%
+  ungroup() %>%
   mutate(acnTemp = paste(accession, temperature, sep = '_'), expression = `mean(expression)`) %>%
   select(-`mean(expression)`)
 
