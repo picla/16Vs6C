@@ -1,0 +1,365 @@
+---
+title: "coldAcclimation_transcription"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(stringr)
+library(tidyverse)
+library(ggpubr)
+library(tximport)
+library(DESeq2)
+library(vsn)
+library(viridis)
+library(ggdendro)
+library(gridExtra)
+library(gtable)
+library(grid)
+library(pheatmap)
+library(limma)
+knitr::opts_knit$set(root.dir = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/')
+```
+
+```{r data}
+# RNA-seq samples
+samples <- read_delim('/groups/nordborg/projects/cegs/16Vs6C/Data/Transcriptome/RawData/samples.txt', delim = '\t')
+# worldclim data
+worldclim <- read_csv('/groups/nordborg/user/pieter.clauw/Documents/Source/Accessions/2029_modified_MN_SH_wc2.0_30s_bilinear.csv')
+meta <- read_csv('/groups/nordborg/user/pieter.clauw/Documents/Source/Accessions/A.thaliana_master_accession_list_011215.csv')
+# growth parameters
+growth <- read_csv('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/growthParameters_bayesian_2.0.csv')
+# raw phenotyping data
+lemna <- read_delim('Data/Growth/rawdata_combined_annotation_NO.txt', delim = '\t')
+# metabolic distance
+metabolDist <- read_csv('Data/Metabolites/metabolic_distance.csv')
+
+# expression data
+Araport11 <- read.table('/groups/nordborg/user/pieter.clauw/Documents/Source/Araport11/Araport11_GFF3_genes_transposons.201606.ChrM_ChrC_FullName.gtf', sep = '\t')
+
+# CBF regulon according Vogel et al., 2015
+CBF_up <- read_csv('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Transcriptome/VogelEtAl2015/CBF2_upregulated_table7.csv')
+CBF_down <- read_csv('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Transcriptome/VogelEtAl2015/CBF2_downregulated_table8.csv')
+
+load('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Transcriptome/diffExpr_Sonia/all_dds.RData')
+
+```
+
+```{r prepare}
+# filter only sequenced samples
+samples <- filter(samples, Selected == 'yes') %>%
+  mutate(accession = as.factor(accession),
+         temperature = as.factor(temperature),
+         replicate = as.factor(replicate),
+         experiment = as.factor(paste(temperature, replicate, sep = '_')),
+         ID = paste(tray, tray_coordinate, temperature, replicate, sep = '_'),
+         sampleName = paste(accession, temperature, replicate, sep = '_')) %>%
+  left_join(., worldclim[, c('accession', 'bio_11')], by = 'accession')
+
+# gather information for each individual plant
+# data preparation #
+lemna$ID <- paste(lemna$pot, lemna$experiment, sep = '_')
+lemna$acn <- as.character(lemna$acn)
+# summarise metadata for each ID
+ID.meta <- lemna %>%
+  select(ID, accession = acn, experiment, temperature, replicate) %>%
+  distinct() %>%
+  filter(accession %in% unique(samples$accession)) %>%
+  mutate(accession = as.factor(accession))
+
+rm(lemna)
+
+# worldclim
+worldclim <- mutate(worldclim, accession = as.factor(accession))
+
+# growth
+growth <- mutate(growth, accession = as.factor(accession))
+
+# metabolic distance
+metabolDist <- metabolDist %>%
+  select(-X1) %>%
+  mutate(accession = as.factor(accession))
+
+# Araport11
+colnames(Araport11) <- c('chr', 'source', 'feature', 'start', 'end', 'score', 'strand', 'frame', 'attributes')
+Araport11$attributes <- as.character(Araport11$attributes)
+Araport11[,9:10] <- str_split_fixed(Araport11$attributes, ';', 3)[,1:2]
+Araport11$V10 <- sub(".*id ", "", Araport11$V10)
+
+# CBF
+CBF_down <- mutate(CBF_down, direction = 'down')
+CBF_up <- mutate(CBF_up, direction = 'up')
+CBF <- bind_rows(CBF_down, CBF_up) %>%
+  mutate(AGI = toupper(AGI))
+```
+
+
+```{r gather individual plant growth parameters}
+# gather individual growth parameters
+fit.bayes.coef <- tibble(
+  ID = character(),
+  M0 = numeric(),
+  r = numeric(),
+  beta = numeric(),
+  M0_ESS = numeric(),
+  r_ESS = numeric(),
+  beta_ESS = numeric())
+
+for (acn in unique(samples$accession))
+{
+  file.acn <- paste('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/models/coef_perAcn_2.0/fit.bayesian_2.0.coef_', acn, '.csv', sep = '')
+  if (! file.exists(file.acn)){warning(paste('no summary file for accession:', acn)); next}
+  coef.acn <- read_csv(file.acn)
+  fit.bayes.coef <- bind_rows(fit.bayes.coef, coef.acn)
+}
+
+fit.bayes.coef <- fit.bayes.coef %>%
+  left_join(ID.meta, by = 'ID') %>%
+  select(ID, accession, experiment, temperature, replicate, M0, r, beta, M0_ESS, r_ESS, beta_ESS) %>%
+  mutate(accession = as.factor(accession))
+```
+
+
+## signatures of cold acclimation in natural variation in transcription response to 6°C and 16°C
+Idea is that accessions from colder climates are preparing for freezing temperatures faster than accessions from warmer climates.
+Evidence:
+- growth. accessions from coder climates are growing slower than accessions from warmer climates, both at 16°C and 6°C. This is probably due to active growth regulation
+
+- metabolism. accessions from colder climates show, on average, a stronger metabolic response to the temperature difference, with some typical cold acclimation responses (sugar metabolism, raffinose ...)
+
+Can we explore this further with the 8 RNA-seq accessions?
+
+### growth profile of the accessions
+Measurements of the individual plants (used for transcription) + accession estimates.
+```{r individual growth}
+r.6C.plot <- fit.bayes.coef %>%
+  select(ID, accession, temperature, r) %>%
+  filter(temperature == '6C') %>%
+  left_join(., worldclim[, c('accession', 'bio_11')], by = 'accession') %>%
+  left_join(., samples[, c('ID', 'Selected')], by = 'ID') %>%
+  mutate(RNAseq = Selected,
+         RNAseq = replace_na(RNAseq, 'no'),
+         RNAseq = as.factor(RNAseq)) %>%
+  left_join(., growth[, c('accession', 'temperature', 'r')], by = c('accession', 'temperature'), suffix = c('', '.acnEst')) %>%
+  ggplot(aes(bio_11, r)) +
+  geom_point(aes(color = accession, shape = RNAseq), size = 2) +
+  scale_shape_manual(values = c(1,16)) +
+  geom_point(aes(bio_11, r.acnEst, color = accession), shape = 4, size = 3) +
+  theme_minimal()
+
+r.16C.plot <- fit.bayes.coef %>%
+  select(ID, accession, temperature, r) %>%
+  filter(temperature == '16C') %>%
+  left_join(., worldclim[, c('accession', 'bio_11')], by = 'accession') %>%
+  left_join(., samples[, c('ID', 'Selected')], by = 'ID') %>%
+  mutate(RNAseq = Selected,
+         RNAseq = replace_na(RNAseq, 'no'),
+         RNAseq = as.factor(RNAseq)) %>%
+  left_join(., growth[, c('accession', 'temperature', 'r')], by = c('accession', 'temperature'), suffix = c('', '.acnEst')) %>%
+  ggplot(aes(bio_11, r)) +
+  geom_point(aes(color = accession, shape = RNAseq), size = 2) +
+  scale_shape_manual(values = c(1,16)) +
+  geom_point(aes(bio_11, r.acnEst, color = accession), shape = 4, size = 3) +
+  theme_minimal()
+
+pdf('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Transcriptome/Plots/Growth_RNAseqSAmples.pdf')
+ggarrange(r.16C.plot, r.6C.plot)
+dev.off()
+```
+Selected plants seem average in growth for their respective accessions.
+For the selected accessions there still is a clear correlation between growth rate at 16°C and bio_11.
+this correlation is not present at 6°C
+
+### metabolome profile of the accessions
+metabolic distance of these accessions.
+```{r metabolic distance of accessions}
+metabolDist.plot <- metabolDist %>%
+  filter(accession %in% unique(samples$accession)) %>%
+  left_join(., worldclim[, c('accession', 'bio_11')], by = 'accession') %>%
+  ggplot(aes(bio_11, distance)) +
+  geom_point(aes(color = accession)) +
+  theme_minimal()
+  
+pdf('Results/Transcriptome/Plots/metabolicDistance_RNAseqSamples.pdf')
+print(metabolDist.plot)
+dev.off()
+```
+
+
+Still a clear correlation between bio_11 and metabolic distance for the selected accessions.
+
+## variation of CBF regulon
+```{r expression data}
+# data
+expression.files <- file.path('/groups/nordborg/projects/cegs/16Vs6C/Results/SalmonQuant/', samples$basename, '' ,'_quasiMap_pseudoG_Trimmed/quant.sf', fsep = '')
+names(expression.files) <- samples$sample
+
+# transcript <-> gene
+tx2gene <- data.frame('transcriptID' = sub(".*id ", "", Araport11$attributes), 'geneID' = Araport11$V10)
+
+# import salmon quantification data
+samples.acn1 <- samples$sample[samples$accession %in% unique(samples$accession)[1]]
+txi <- tximport(expression.files[samples.acn1], tx2gene = tx2gene, type = 'salmon', dropInfReps = T)
+for (acn in unique(samples$accession)[-1])
+{
+  samples.acn <- samples$sample[samples$accession %in% acn]
+  txi.acn <- tximport(expression.files[samples.acn], tx2gene = tx2gene, type = 'salmon', dropInfReps = T)
+  # use overlapping genes
+  idx <- intersect(rownames(txi$counts), rownames(txi.acn$counts))
+  txi$abundance <- cbind(txi$abundance[idx, ], txi.acn$abundance[idx, ])
+  txi$counts <- cbind(txi$counts[idx, ], txi.acn$counts[idx, ])
+  txi$length <- cbind(txi$length[idx, ], txi.acn$length[idx, ])
+}
+
+
+#match Colnames with samples order
+txi$abundance <- txi$abundance[ ,samples$sample]
+txi$counts <- txi$counts[ ,samples$sample]
+txi$length <- txi$length[ ,samples$sample]
+```
+```{r missing transcripts}
+tx2gene <- data.frame('transcriptID' = sub(".*id ", "", Araport11$attributes), 'geneID' = Araport11$V10)
+
+# import salmon quantification data
+sample1 <- samples$sample[1]
+txi.sample1 <- tximport(expression.files[sample1], tx2gene = tx2gene, type = 'salmon', dropInfReps = T)
+sample1.quant <- read.table(expression.files[sample1], sep = '\t', header = T)
+
+setdiff(tx2gene$transcriptID, sample1.quant$Name)
+setdiff(sample1.quant$Name, tx2gene$transcriptID)
+```
+Missing transcripts seem to be miRNAs.
+```{r create DESeq DataSet}
+dds.full <- DESeqDataSetFromTximport(txi, colData = samples, design = ~  replicate + accession + temperature + accession:temperature)
+dds <- estimateSizeFactors(dds.full)
+# select only genes with more than in 10 reads in minimum 10% of the samples
+idx <- rowSums(counts(dds) >= 10 ) >= nrow(samples) * 0.1
+dds<- dds[idx,]
+```
+
+
+## Variance stabilisation
+RNA-seq count data is typically heteroscedastic, meansing that the variance correlates with the mean.
+The variance stabilisation will make the count data more homoscedastic.
+This cannot be done for differential expression analyis,
+but is advised for clustering, PCA and visualisation.
+For more details see [DESeQ2 preprint](https://www.biorxiv.org/content/biorxiv/early/2014/02/19/002832.full.pdf).
+
+```{r compare VST to rlog}
+dds.varStab <- varianceStabilizingTransformation(dds, blind=F)
+dds.rlog <- rlog(dds, blind=F)
+par(mfrow = c(1,2))
+meanSdPlot(assay(dds.varStab))
+meanSdPlot(assay(dds.rlog))
+```
+## remove batch effect
+```{r remove batch effect}
+dds.varStab.NB <- dds.varStab
+assay(dds.varStab.NB) <- removeBatchEffect(assay(dds.varStab.NB), dds.varStab.NB$replicate)
+pcaData <- plotPCA(dds.varStab.NB, intgroup=c("temperature", "accession"), returnData=T)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+ggplot(pcaData, aes(PC1, PC2, color=temperature, shape=accession)) +
+  geom_point(size=3) +
+  scale_shape_manual(values=c(15, 19, 17, 18, 4, 8, 9, 11)) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  coord_fixed()
+```
+After removing batch effect, the temperature split within each accession is more clearly defined.
+Therefore we continue with the batch correct data.
+
+What is the expression profile of the CBF regulon in the different accessions/samples?
+```{r CBF regulon heatmap - samples}
+CBF.strict <- filter(CBF, coldResponsive == 'x')
+# prepare data
+dds.CBF <- as_tibble(assay(dds.varStab.NB), rownames = 'gene') %>%
+  filter(gene %in% CBF.strict$AGI) %>%
+  pivot_longer(cols = !'gene', names_to = 'sample', values_to = 'expression') %>%
+  left_join(., samples[, c('sample', 'accession', 'temperature', 'replicate', 'sampleName')], by = 'sample') %>%
+  select(gene, sample, accession, temperature, replicate, sampleName, expression)
+
+# Convert to a matrix for clustering
+dds.CBF.wide <- dds.CBF %>%
+  select(gene, sampleName, expression) %>%
+  pivot_wider(id_cols = gene, names_from = sampleName, values_from = expression)
+
+dds.CBF.mtrx <- as.matrix(dds.CBF.wide[, -1])
+rownames(dds.CBF.mtrx) <- dds.CBF.wide$gene
+
+# climate annotation
+clim.annot <- data.frame(bio_11 = samples$bio_11, row.names = samples$sampleName)
+
+# pheatmap
+pheatmap(dds.CBF.mtrx,
+         color = viridis(length(min(dds.CBF.mtrx):max(dds.CBF.mtrx))),
+         clustering_method = 'ward.D2',
+         cutree_cols = 4,
+         annotation_col = clim.annot,
+         annotation_names_col = F,
+         show_rownames = F,
+         border_color = NA)
+```
+```{r CBF regulon heatmap - accessions}
+CBF.strict <- filter(CBF, coldResponsive == 'x')
+# prepare data
+dds.CBF.acnTemp <- as_tibble(assay(dds.varStab.NB), rownames = 'gene') %>%
+  filter(gene %in% CBF.strict$AGI) %>%
+  pivot_longer(cols = !'gene', names_to = 'sample', values_to = 'expression') %>%
+  left_join(., samples[, c('sample', 'accession', 'temperature', 'replicate', 'sampleName')], by = 'sample') %>%
+  select(gene, sample, accession, temperature, expression) %>%
+  group_by(accession, temperature, gene) %>%
+  summarise(mean(expression)) %>%
+  mutate(acnTemp = paste(accession, temperature, sep = '_'), expression = `mean(expression)`) %>%
+  select(-`mean(expression)`)
+
+# Convert to a matrix for clustering
+dds.CBF.wide <- dds.CBF.acnTemp %>%
+  select(gene, acnTemp, expression) %>%
+  pivot_wider(id_cols = gene, names_from = acnTemp, values_from = expression)
+
+dds.CBF.mtrx <- as.matrix(dds.CBF.wide[, -1])
+rownames(dds.CBF.mtrx) <- dds.CBF.wide$gene
+
+# climate annotation
+clim.annot <- mutate(samples, acnTemp = paste(accession, temperature, sep = '_')) %>%
+  select(acnTemp, bio_11) %>%
+  distinct()
+clim.annot <-data.frame(bio_11 = clim.annot$bio_11, row.names = clim.annot$acnTemp)
+
+# pheatmap
+pheatmap(dds.CBF.mtrx,
+         color = viridis(length(min(dds.CBF.mtrx):max(dds.CBF.mtrx))),
+         clustering_method = 'ward.D2',
+         cutree_cols = 4,
+         annotation_col = clim.annot,
+         annotation_names_col = F,
+         show_rownames = F,
+         border_color = NA)
+```
+
+Is the CBF regulon deferentially expressed between 16 and 6°C in the different accessions?
+```{r volcano plots per accession}
+
+  
+```
+
+Do the CBF regulon genes show GxE?
+```{r CBF regulon GxE}
+
+```
+
+
+
+
+
+
+
+## Active growth inhibition in 16°C and 6°C in cold climate accessions.
+DELLA proteins
+GA metabolism
+Ethylene metabolism
+cyclins/ CDKs
+CAMTA TFs
+ZAT12
+...
