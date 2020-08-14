@@ -19,6 +19,7 @@ library(gtable)
 library(grid)
 library(pheatmap)
 library(limma)
+source('diffExpr_functions.r')
 knitr::opts_knit$set(root.dir = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/')
 ```
 
@@ -41,9 +42,6 @@ Araport11 <- read.table('/groups/nordborg/user/pieter.clauw/Documents/Source/Ara
 # CBF regulon according Vogel et al., 2015
 CBF_up <- read_csv('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Transcriptome/VogelEtAl2015/CBF2_upregulated_table7.csv')
 CBF_down <- read_csv('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Transcriptome/VogelEtAl2015/CBF2_downregulated_table8.csv')
-
-load('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Transcriptome/diffExpr_Sonia/all_dds.RData')
-
 ```
 
 ```{r prepare}
@@ -212,7 +210,6 @@ for (acn in unique(samples$accession)[-1])
   txi$length <- cbind(txi$length[idx, ], txi.acn$length[idx, ])
 }
 
-
 #match Colnames with samples order
 txi$abundance <- txi$abundance[ ,samples$sample]
 txi$counts <- txi$counts[ ,samples$sample]
@@ -235,7 +232,7 @@ dds.full <- DESeqDataSetFromTximport(txi, colData = samples, design = ~  replica
 dds <- estimateSizeFactors(dds.full)
 # select only genes with more than in 10 reads in minimum 10% of the samples
 idx <- rowSums(counts(dds) >= 10 ) >= nrow(samples) * 0.1
-dds<- dds[idx,]
+dds <- dds[idx,]
 ```
 
 
@@ -309,8 +306,7 @@ dds.CBF.acnTemp <- as_tibble(assay(dds.varStab.NB), rownames = 'gene') %>%
   left_join(., samples[, c('sample', 'accession', 'temperature', 'replicate', 'sampleName')], by = 'sample') %>%
   select(gene, sample, accession, temperature, expression) %>%
   group_by(accession, temperature, gene) %>%
-  summarise(mean(expression)) %>%
-  ungroup() %>%
+  summarise(mean(expression), .groups = 'drop') %>%
   mutate(acnTemp = paste(accession, temperature, sep = '_'), expression = `mean(expression)`) %>%
   select(-`mean(expression)`)
 
@@ -332,24 +328,132 @@ clim.annot <-data.frame(bio_11 = clim.annot$bio_11, row.names = clim.annot$acnTe
 pheatmap(dds.CBF.mtrx,
          color = viridis(length(min(dds.CBF.mtrx):max(dds.CBF.mtrx))),
          clustering_method = 'ward.D2',
+         cutree_rows = 5,
          cutree_cols = 4,
          annotation_col = clim.annot,
          annotation_names_col = F,
          show_rownames = F,
          border_color = NA)
+
+```
+Spanish accession 9559 and 9888 behave differently in both temperatures compared to the other accessions.
+Difference visually seems to be due to a subset of the genes.
+The second cluster from the top seems to be more differentially expressed between 6 and 16ºC in Spanish compared to the other accessions. This cluster seems also more lowly expressed in both temperatures compared to the other accessions.
+The same scenario seems to play in the bottom cluster.
+
+## Is the CBF regulon deferentially expressed between 16 and 6°C in the different accessions?
+```{r differential expression}
+# DE analysis over all accessions
+# set reference condition
+dds.full$temperature <- relevel(dds.full$temperature, ref = "16C")
+dds.full$accession <- relevel(dds.full$accession, ref = '6017')
+
+# differential expression analysis
+dds.full.deseq <- DESeq(dds.full)
 ```
 
-Is the CBF regulon deferentially expressed between 16 and 6°C in the different accessions?
+
 ```{r volcano plots per accession}
+# the temperature effect for 6017 (the main effect)
+res.6017.6vs16 <- results(dds.full.deseq, contrast=c("temperature","6C","16C"))
+volcanoplot_geneSelection(CBF.strict$AGI, res.6017.6vs16, main = '6vs16 in 6017', FC = 1.5, padj = 0.1)
 
-  
+# the temperature effect for 9728
+# this is the main effect *plus* the interaction term
+# (the extra condition effect in 9728 compared to 6017).
+res.9728.6vs16 <- results(dds.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession9728.temperature6C") ))
+volcanoplot_geneSelection(CBF.strict$AGI, res.9728.6vs16, main = '6vs16 in 9728', FC = 1.5, padj = 0.1)
+
+# the temperature effect for 9559
+# this is the main effect *plus* the interaction term
+# (the extra condition effect in 9559 compared to 6017).
+res.9559.6vs16 <- results(dds.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession9559.temperature6C") ))
+volcanoplot_geneSelection(CBF.strict$AGI, res.9559.6vs16, main = '6vs16 in 9559', FC = 1.5, padj = 0.1)
+
+# the temperature effect for 6909.
+# this is the main effect *plus* the interaction term
+# (the extra condition effect in 6909 compared to 6017).
+res.6909.6vs16 <- results(dds.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession6909.temperature6C") ))
+volcanoplot_geneSelection(CBF.strict$AGI, res.6909.6vs16, main = '6vs16 in 6909', FC = 1.5, padj = 0.1)
+
+# the temperature effect for 8242
+# this is the main effect *plus* the interaction term
+# (the extra condition effect in 8242 compared to 6017).
+res.8242.6vs16 <- results(dds.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession8242.temperature6C") ))
+volcanoplot_geneSelection(CBF.strict$AGI, res.8242.6vs16, main = '6vs16 in 8242', FC = 1.5, padj = 0.1)
+
+# the temperature effect for 9888
+# this is the main effect *plus* the interaction term
+# (the extra condition effect in 9888 compared to 6017).
+res.9888.6vs16 <- results(dds.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession9888.temperature6C") ))
+volcanoplot_geneSelection(CBF.strict$AGI, res.9888.6vs16, main = '6vs16 in 9888', FC = 1.5, padj = 0.1)
+
+# the temperature effect for 9433
+# this is the main effect *plus* the interaction term
+# (the extra condition effect in 9433 compared to 6017).
+res.9433.6vs16 <- results(dds.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession9433.temperature6C") ))
+volcanoplot_geneSelection(CBF.strict$AGI, res.9433.6vs16, main = '6vs16 in 9433', FC = 1.5, padj = 0.1)
+
+# the temperature effect for 9075
+# this is the main effect *plus* the interaction term
+# (the extra condition effect in 9075 compared to 6017).
+res.9075.6vs16 <- results(dds.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession9075.temperature6C") ))
+volcanoplot_geneSelection(CBF.strict$AGI, res.9075.6vs16, main = '6vs16 in 9075', FC = 1.5, padj = 0.1)
 ```
+Nothing really obvious from the vulcanoplots.
+Differences observed in the heatmap are probably more quantitative and subtle.
 
 Do the CBF regulon genes show GxE?
-```{r CBF regulon GxE}
+```{r GxE expression of CBF regulon}
+# LRT to find genes with accession specific responses
+dds.CBF <- dds.full[CBF.strict$AGI]
+dds.GxE <- estimateSizeFactors(dds.CBF)
+dds.GxE <- estimateDispersions(dds.GxE)
+dds.GxE <- nbinomLRT(dds.GxE, full = ~ replicate + accession + temperature + accession:temperature, reduced = ~ replicate + accession + temperature)
+res.GxE <- results(dds.GxE)
+res.GxE.FC0_p10 <- getDF_select_FC_padj(res.GxE, FC = 0, padj = 0.1)
 
+volcanoplot_geneSelection(CBF.strict$AGI, res.GxE, main = 'GxE', FC = 0, padj = 0.1)
 ```
+interesting list of genes from the CBF regulon (Vogel et al., 2015) shows GxE in expression.
+among the genes is CIPK25 (growth regualtion?)
+and a couple of primary metabolic enzymes (galactinol synthase 3; beta glucosidase 7; sucrose synthase 1)
 
+Where are the GxE genes located in the heatmap?
+
+```{r dependson = 'CBF regulon heatmap - accessions'}
+GxE.annot <- CBF.strict %>%
+  rename(AGI = 'gene') %>%
+  left_join(., res.GxE.FC0_p10[, c('gene', 'padj')], by = 'gene') %>%
+  mutate(GxE = ifelse(is.na(padj), 0, 1)) %>%
+  select(gene, GxE)
+GxE.annot <- data.frame(GxE = GxE.annot$GxE, row.names = GxE.annot$gene)
+
+pheatmap(dds.CBF.mtrx,
+         color = viridis(length(min(dds.CBF.mtrx):max(dds.CBF.mtrx))),
+         clustering_method = 'ward.D2',
+         cutree_rows = 5,
+         cutree_cols = 4,
+         annotation_row = GxE.annot,
+         annotation_col = clim.annot,
+         annotation_names_col = F,
+         show_rownames = F,
+         border_color = NA)
+```
+What about difference in response between Spanish and the other accessions?
+```{r GEOxE Spanish vs other accessions}
+# LRT to find genes with accession specific responses
+dds.CBF <- dds.full[CBF.strict$AGI]
+dds.CBF$geo <- ifelse(dds.CBF$accession %in% c(9559, 9888), 'ESP', 'other') 
+dds.GEOxE <- estimateSizeFactors(dds.CBF)
+dds.GEOxE <- estimateDispersions(dds.GEOxE)
+dds.GEOxE <- nbinomLRT(dds.GEOxE, full = ~ replicate + geo + temperature + geo:temperature, reduced = ~ replicate + geo + temperature)
+res.GEOxE <- results(dds.GEOxE)
+res.GEOxE.FC0_p10 <- getDF_select_FC_padj(res.GEOxE, FC = 0, padj = 0.1)
+
+volcanoplot_geneSelection(CBF.strict$AGI, res.GxE, main = 'GxE', FC = 0, padj = 0.1)
+```
+GxE for spanish versus other accessions delivers only 4 genes with significant G(EO)xE interaction.
 
 
 
