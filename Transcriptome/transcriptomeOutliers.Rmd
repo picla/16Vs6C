@@ -1,0 +1,573 @@
+---
+title: "transcriptomeOutliers"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(tidyverse)
+library(tximport)
+library(DESeq2)
+library(vsn)
+library(limma)
+library(ggpubr)
+source('diffExpr_functions.r')
+knitr::opts_knit$set(root.dir = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/')
+```
+```{r data}
+# RNA-seq samples
+samples <- read_delim('/groups/nordborg/projects/cegs/16Vs6C/Data/Transcriptome/RawData/samples.txt', delim = '\t')
+
+# Araport11
+Araport11 <- read.table('/groups/nordborg/user/pieter.clauw/Documents/Source/Araport11/Araport11_GFF3_genes_transposons.201606.ChrM_ChrC_FullName.gtf', sep = '\t')
+```
+```{r prepare}
+# filter only sequenced samples
+samples <- filter(samples, Selected == 'yes') %>%
+  mutate(accession = as.factor(accession),
+         temperature = as.factor(temperature),
+         replicate = as.factor(replicate),
+         experiment = as.factor(paste(temperature, replicate, sep = '_')),
+         ID = paste(tray, tray_coordinate, temperature, replicate, sep = '_'),
+         sampleName = paste(accession, temperature, replicate, sep = '_'))
+
+PCA.outliers <- c('9559_16C_rep1', '6909_6C_rep1', '9888_16C_rep1', '9433_16C_rep2', '9075_16C_rep3')
+samples.NO <- filter(samples, !sampleName %in% PCA.outliers)
+
+
+# Araport11
+colnames(Araport11) <- c('chr', 'source', 'feature', 'start', 'end', 'score', 'strand', 'frame', 'attributes')
+Araport11$attributes <- as.character(Araport11$attributes)
+Araport11[,9:10] <- str_split_fixed(Araport11$attributes, ';', 3)[,1:2]
+Araport11$V10 <- sub(".*id ", "", Araport11$V10)
+```
+
+```{r expression data}
+# data
+expression.files <- file.path('/groups/nordborg/projects/cegs/16Vs6C/Results/SalmonQuant/', samples$basename, '' ,'_quasiMap_pseudoG_Trimmed/quant.sf', fsep = '')
+names(expression.files) <- samples$sample
+
+# transcript <-> gene
+tx2gene <- data.frame('transcriptID' = sub(".*id ", "", Araport11$attributes), 'geneID' = Araport11$V10)
+
+# import salmon quantification data
+samples.acn1 <- samples$sample[samples$accession %in% unique(samples$accession)[1]]
+txi <- tximport(expression.files[samples.acn1], tx2gene = tx2gene, type = 'salmon', dropInfReps = T)
+for (acn in unique(samples$accession)[-1])
+{
+  samples.acn <- samples$sample[samples$accession %in% acn]
+  txi.acn <- tximport(expression.files[samples.acn], tx2gene = tx2gene, type = 'salmon', dropInfReps = T)
+  # use overlapping genes
+  idx <- intersect(rownames(txi$counts), rownames(txi.acn$counts))
+  txi$abundance <- cbind(txi$abundance[idx, ], txi.acn$abundance[idx, ])
+  txi$counts <- cbind(txi$counts[idx, ], txi.acn$counts[idx, ])
+  txi$length <- cbind(txi$length[idx, ], txi.acn$length[idx, ])
+}
+
+#match Colnames with samples order
+txi$abundance <- txi$abundance[ ,samples$sample]
+txi$counts <- txi$counts[ ,samples$sample]
+txi$length <- txi$length[ ,samples$sample]
+```
+```{r create DESeq DataSet}
+dds.full <- DESeqDataSetFromTximport(txi, colData = samples, design = ~  replicate + accession + temperature + replicate:temperature + accession:temperature)
+dds <- estimateSizeFactors(dds.full)
+# select only genes with more than in 10 reads in minimum 10% of the samples
+idx <- rowSums(counts(dds) >= 10 ) >= nrow(samples) * 0.1
+dds <- dds[idx,]
+```
+```{r variance stabilisation}
+dds.varStab <- varianceStabilizingTransformation(dds, blind=F)
+meanSdPlot(assay(dds.varStab))
+```
+
+
+
+```{r remove batch effect}
+dds.varStab.NB <- dds.varStab
+assay(dds.varStab.NB) <- removeBatchEffect(assay(dds.varStab.NB), dds.varStab.NB$experiment)
+```
+
+```{r PCA}
+pcaData <- plotPCA(dds.varStab.NB, intgroup=c("temperature", "accession"), returnData=T, ntop = 500)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+pca.default <- ggplot(pcaData, aes(PC1, PC2, color=temperature, shape=accession)) +
+  geom_point(size=3) +
+  scale_shape_manual(values=c(15, 19, 17, 18, 4, 8, 9, 11)) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  coord_fixed()
+
+pdf('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Transcriptome/Plots/PCA_ntop500.pdf')
+print(pca.default)
+dev.off()
+
+pca.default
+```
+
+
+## Why is Col-0 an outlier?
+```{r PCA - Col-outlier}
+pcaData <- plotPCA(dds.varStab.NB, intgroup=c("temperature", "accession"), returnData=T, ntop = 50)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+pca.ntop50 <- ggplot(pcaData, aes(PC1, PC2, color=temperature, shape=accession)) +
+  geom_point(size=3) +
+  scale_shape_manual(values=c(15, 19, 17, 18, 4, 8, 9, 11)) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  coord_fixed()
+
+pdf('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Transcriptome/Plots/PCA_ntop50.pdf')
+print(pca.ntop50)
+dev.off()
+pca.ntop50
+```
+
+```{r PCA}
+pcaData <- plotPCA(dds.varStab.NB, intgroup=c("temperature", "accession"), returnData=T, ntop = length(dds.varStab.NB))
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+pca.fulldata <- ggplot(pcaData, aes(PC1, PC2, color=temperature, shape=accession)) +
+  geom_point(size=3) +
+  scale_shape_manual(values=c(15, 19, 17, 18, 4, 8, 9, 11)) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  coord_fixed()
+
+pdf('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Transcriptome/Plots/PCA_fulldataset.pdf')
+print(pca.fulldata)
+dev.off()
+pca.fulldata
+```
+Col-0 is an outlier when only the top 500 most variable genes are used to construct the PCA.
+Over the entire transcriptome, Col-0 is no outlier.
+However, what is special about these 500 genes?
+
+
+To investigate whether the 500 genes show more variation specifically in Col-0.
+We'll plot the deviation from the overall mean for each gene. one plot per temperature
+-> start with 50 genes.
+```{r deviation}
+# calculate the variance for each gene
+rv <- rowVars(assay(dds.varStab.NB))
+
+# select the ntop = 500 genes by variance
+select <- order(rv, decreasing=TRUE)[seq_len(min(50, length(rv)))]
+dds.pca <- dds.varStab.NB[select]
+
+# means per gene
+gene.mean <- rowMeans(assay(dds.pca))
+gene.sd <- rowSds(assay(dds.pca))
+
+# deviation from the mean for each sample
+# calculated as z-score: difference from the gene average, corrected for the gene's standard deviation
+# this way each gene follows a normal distribution with mean = 0 and standard deviation = 1.
+expr.deviation <- as_tibble((assay(dds.pca) - gene.mean)/gene.sd, rownames = 'gene') %>%
+  pivot_longer(-gene, names_to = 'sample', values_to = 'expression_deviation') %>%
+  left_join(., samples[, c('sample', 'accession', 'temperature', 'replicate')], by = 'sample')
+```
+
+```{r plot deviation}
+plot.16C.sample <- filter(expr.deviation, temperature == '16C') %>%
+  mutate(sampleName = paste(accession, replicate, sep = '_')) %>%
+  ggplot(aes(sampleName, expression_deviation, group = gene, colour = gene)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 90)) +
+  ggtitle('16C')
+
+plot.6C.sample <- filter(expr.deviation, temperature == '6C') %>%
+  mutate(sampleName = paste(accession, replicate, sep = '_')) %>%
+  ggplot(aes(sampleName, expression_deviation, group = gene, colour = gene)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 90)) +
+  ggtitle('6C')
+
+plot.16C.6C.sample <- ggarrange(plot.16C.sample, plot.6C.sample, ncol = 1)
+pdf('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Transcriptome/Plots/deviationFromTheMean.pdf')
+print(plot.16C.6C.sample)
+dev.off()
+plot.16C.6C.sample
+```
+```{r distribution of deviation}
+hist.deviation.16C <- expr.deviation %>%
+  filter(temperature == '16C') %>%
+  ggplot(aes(x = abs(expression_deviation), fill = accession)) +
+  geom_histogram(aes(color = accession) , alpha = 0.6, position = 'identity') +
+  ggtitle('16C')
+
+hist.deviation.6C <- expr.deviation %>%
+  filter(temperature == '6C') %>%
+  ggplot(aes(x = abs(expression_deviation), fill = accession)) +
+  geom_histogram(aes(color = accession) , alpha = 0.6, position = 'identity') +
+  ggtitle('16C')
+
+hist.16C.6C <- ggarrange(hist.deviation.16C, hist.deviation.6C, ncol = 1)
+
+pdf('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Transcriptome/Plots/deviationFromTheMean_histogram.pdf')
+print(hist.16C.6C)
+dev.off()
+hist.16C.6C 
+```
+distribution differences are not overwhelming.
+check the other principal components.
+
+```{r PCA beyond PC2}
+ntop = 500
+# calculate the variance for each gene
+rv <- rowVars(assay(dds.varStab.NB))
+
+# select the ntop genes by variance
+select <- order(rv, decreasing=TRUE)[seq_len(min(ntop, length(rv)))]
+
+# perform a PCA on the data in assay(x) for the selected genes
+pca <- prcomp(t(assay(dds.varStab.NB)[select,]))
+
+# the contribution to the total variance for each component
+percentVar <- pca$sdev^2 / sum( pca$sdev^2 )
+
+PCA.1.2 <- as_tibble(pca$x, rownames = 'sample') %>%
+  left_join(., samples[, c('sample', 'accession', 'temperature', 'replicate')], by = 'sample') %>%
+  ggplot(aes(PC1, PC2, color = temperature, shape = accession)) +
+  geom_point(size = 3) +
+  scale_color_manual(values=c('#0047BB', '#8BD52D')) +
+  scale_shape_manual(values=c(15, 19, 17, 18, 4, 8, 9, 11)) +
+  xlab(paste0("PC1: ",round(percentVar[1] * 100),"% variance")) +
+  ylab(paste0("PC2: ",round(percentVar[2] * 100),"% variance"))
+
+PCA.3.4 <- as_tibble(pca$x, rownames = 'sample') %>%
+  left_join(., samples[, c('sample', 'accession', 'temperature', 'replicate')], by = 'sample') %>%
+  ggplot(aes(PC3, PC4, color = temperature, shape = accession)) +
+  geom_point(size = 3) +
+  scale_color_manual(values=c('#0047BB', '#8BD52D')) +
+  scale_shape_manual(values=c(15, 19, 17, 18, 4, 8, 9, 11)) +
+  xlab(paste0("PC3: ",round(percentVar[3] * 100),"% variance")) +
+  ylab(paste0("PC4: ",round(percentVar[4] * 100),"% variance"))
+
+PCA.5.6 <- as_tibble(pca$x, rownames = 'sample') %>%
+  left_join(., samples[, c('sample', 'accession', 'temperature', 'replicate')], by = 'sample') %>%
+  ggplot(aes(PC5, PC6, color = temperature, shape = accession)) +
+  geom_point(size = 3) +
+  scale_color_manual(values=c('#0047BB', '#8BD52D')) +
+  scale_shape_manual(values=c(15, 19, 17, 18, 4, 8, 9, 11)) +
+  xlab(paste0("PC5: ",round(percentVar[5] * 100),"% variance")) +
+  ylab(paste0("PC6: ",round(percentVar[6] * 100),"% variance"))
+
+PCA.7.8 <- as_tibble(pca$x, rownames = 'sample') %>%
+  left_join(., samples[, c('sample', 'accession', 'temperature', 'replicate')], by = 'sample') %>%
+  ggplot(aes(PC7, PC8, color = temperature, shape = accession)) +
+  geom_point(size = 3) +
+  scale_color_manual(values=c('#0047BB', '#8BD52D')) +
+  scale_shape_manual(values=c(15, 19, 17, 18, 4, 8, 9, 11)) +
+  xlab(paste0("PC7: ",round(percentVar[7] * 100),"% variance")) +
+  ylab(paste0("PC8: ",round(percentVar[8] * 100),"% variance"))
+
+PCA.all <- ggarrange(PCA.1.2, PCA.3.4, PCA.5.6, PCA.7.8, common.legend = T)
+PCA.all <- annotate_figure(PCA.all, top = paste('ntop =', ntop))
+pdf('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Transcriptome/Plots/PCA_ntop500_8PCs.pdf')
+print(PCA.all)
+dev.off()
+PCA.all
+```
+```{r PCA beyond PC2 - all data}
+ntop = 30000
+# calculate the variance for each gene
+rv <- rowVars(assay(dds.varStab.NB))
+
+# select the ntop genes by variance
+select <- order(rv, decreasing=TRUE)[seq_len(min(ntop, length(rv)))]
+
+# perform a PCA on the data in assay(x) for the selected genes
+pca <- prcomp(t(assay(dds.varStab.NB)[select,]))
+
+# the contribution to the total variance for each component
+percentVar <- pca$sdev^2 / sum( pca$sdev^2 )
+
+PCA.1.2 <- as_tibble(pca$x, rownames = 'sample') %>%
+  left_join(., samples[, c('sample', 'accession', 'temperature', 'replicate')], by = 'sample') %>%
+  ggplot(aes(PC1, PC2, color = temperature, shape = accession)) +
+  geom_point(size = 3) +
+  scale_color_manual(values=c('#0047BB', '#8BD52D')) +
+  scale_shape_manual(values=c(15, 19, 17, 18, 4, 8, 9, 11)) +
+  xlab(paste0("PC1: ",round(percentVar[1] * 100),"% variance")) +
+  ylab(paste0("PC2: ",round(percentVar[2] * 100),"% variance"))
+
+PCA.3.4 <- as_tibble(pca$x, rownames = 'sample') %>%
+  left_join(., samples[, c('sample', 'accession', 'temperature', 'replicate')], by = 'sample') %>%
+  ggplot(aes(PC3, PC4, color = temperature, shape = accession)) +
+  geom_point(size = 3) +
+  scale_color_manual(values=c('#0047BB', '#8BD52D')) +
+  scale_shape_manual(values=c(15, 19, 17, 18, 4, 8, 9, 11)) +
+  xlab(paste0("PC3: ",round(percentVar[3] * 100),"% variance")) +
+  ylab(paste0("PC4: ",round(percentVar[4] * 100),"% variance"))
+
+PCA.5.6 <- as_tibble(pca$x, rownames = 'sample') %>%
+  left_join(., samples[, c('sample', 'accession', 'temperature', 'replicate')], by = 'sample') %>%
+  ggplot(aes(PC5, PC6, color = temperature, shape = accession)) +
+  geom_point(size = 3) +
+  scale_color_manual(values=c('#0047BB', '#8BD52D')) +
+  scale_shape_manual(values=c(15, 19, 17, 18, 4, 8, 9, 11)) +
+  xlab(paste0("PC5: ",round(percentVar[5] * 100),"% variance")) +
+  ylab(paste0("PC6: ",round(percentVar[6] * 100),"% variance"))
+
+PCA.7.8 <- as_tibble(pca$x, rownames = 'sample') %>%
+  left_join(., samples[, c('sample', 'accession', 'temperature', 'replicate')], by = 'sample') %>%
+  ggplot(aes(PC7, PC8, color = temperature, shape = accession)) +
+  geom_point(size = 3) +
+  scale_color_manual(values=c('#0047BB', '#8BD52D')) +
+  scale_shape_manual(values=c(15, 19, 17, 18, 4, 8, 9, 11)) +
+  xlab(paste0("PC7: ",round(percentVar[7] * 100),"% variance")) +
+  ylab(paste0("PC8: ",round(percentVar[8] * 100),"% variance"))
+
+PCA.all <- ggarrange(PCA.1.2, PCA.3.4, PCA.5.6, PCA.7.8, common.legend = T)
+PCA.all <- annotate_figure(PCA.all, top = paste('ntop =', ntop))
+pdf('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Transcriptome/Plots/PCA_ntop30000_8PCs.pdf')
+print(PCA.all)
+dev.off()
+PCA.all
+```
+depending on the sleected PCs, other accesisons seem to be outliers.
+Probably more Col-0 acting biologically weirder, compared to the others, resulting in distinct expression in the most variable genes.
+Surely not a genome-wide pattern (disapears when all genes are taken into account) and since other PCs give other accessions as outliers, it is not specific to Col-0.
+AS it is stronger for Col-0 (higher variance explained by PC2 than e.g. PC4) a slight reference bias effect cannot entirely be excluded.
+
+
+```{r deviant genes}
+deviation.select <- expr.deviation %>%
+  filter(accession == 6909, abs(expression_deviation) >= 1.5)
+
+deviant.genes <- unique(deviation.select$gene)
+```
+
+## Does it affect the GxE?
+rerun analysis without Col-0
+
+
+
+
+## effect of other outliers?
+```{r PCA per accession}
+PCA.plots <- list()
+for (acn in unique(samples$accession))
+{
+  samples.acn <- samples[samples$accession == acn, ]
+  txi.acn <- tximport(expression.files[samples.acn$sample], tx2gene = tx2gene, type = 'salmon', dropInfReps = T)
+  dds.a.full <- DESeqDataSetFromTximport(txi.acn, colData = samples.acn, design = ~  replicate + temperature)
+  #pdf(paste('Results/Transcriptome/DiffExpr_allAcns/Plots/PCA/PCA_quasiMap_pseudoG_', a, '.pdf', sep = ''))
+  PCA.plots[[acn]] <- PCAplot_temp_rep(dds.a.full, title = acn)
+  #dev.off()
+}
+ggarrange(plotlist = PCA.plots, label.y = 'PC2', label.x = 'PC1', common.legend = T)
+```
+Outliers still present when all genes are used for PCA.
+As pointe out before, outliers probabaly caused due to minor bacterial, fungal and or viral infections. As was shown by the involved genes.
+
+rerun differential expression and GxE without outliers
+```{r import no outlier expression data}
+# import salmon quantification data
+samples.NO.acn1 <- samples.NO$sample[samples.NO$accession %in% unique(samples.NO$accession)[1]]
+txi.NO <- tximport(expression.files[samples.NO.acn1], tx2gene = tx2gene, type = 'salmon', dropInfReps = T)
+for (acn in unique(samples.NO$accession)[-1])
+{
+  samples.NO.acn <- samples.NO$sample[samples.NO$accession %in% acn]
+  txi.NO.acn <- tximport(expression.files[samples.NO.acn], tx2gene = tx2gene, type = 'salmon', dropInfReps = T)
+  # use overlapping genes
+  idx <- intersect(rownames(txi.NO$counts), rownames(txi.NO.acn$counts))
+  txi.NO$abundance <- cbind(txi.NO$abundance[idx, ], txi.NO.acn$abundance[idx, ])
+  txi.NO$counts <- cbind(txi.NO$counts[idx, ], txi.NO.acn$counts[idx, ])
+  txi.NO$length <- cbind(txi.NO$length[idx, ], txi.NO.acn$length[idx, ])
+}
+
+#match Colnames with samples order
+txi.NO$abundance <- txi.NO$abundance[ ,samples.NO$sample]
+txi.NO$counts <- txi.NO$counts[ ,samples.NO$sample]
+txi.NO$length <- txi.NO$length[ ,samples.NO$sample]
+```
+```{r differential expression}
+# DE analysis over all accessions
+# full model
+# TODO: change replciaet to experiment
+dds.full <- DESeqDataSetFromTximport(txi, colData = samples, design = ~  replicate + accession + temperature + replicate:temperature + accession:temperature)
+dds.NO.full <- DESeqDataSetFromTximport(txi.NO, colData = samples.NO, design = ~ replicate + accession + temperature + replicate:temperature + accession:temperature)
+# temperature model
+dds.temp <- DESeqDataSetFromTximport(txi, colData = samples, design = ~ replicate + accession + temperature + replicate:temperature)
+dds.NO.temp <- DESeqDataSetFromTximport(txi.NO, colData = samples.NO, design = ~ replicate + accession + temperature + replicate:temperature)
+
+# set reference condition
+dds.full$temperature <- relevel(dds.full$temperature, ref = "16C")
+dds.full$accession <- relevel(dds.full$accession, ref = '6017')
+dds.temp$temperature <- relevel(dds.temp$temperature, ref = "16C")
+dds.temp$accession <- relevel(dds.temp$accession, ref = '6017')
+
+dds.NO.full$temperature <- relevel(dds.NO.full$temperature, ref = "16C")
+dds.NO.full$accession <- relevel(dds.NO.full$accession, ref = '6017')
+dds.NO.temp$temperature <- relevel(dds.NO.temp$temperature, ref = "16C")
+dds.NO.temp$accession <- relevel(dds.NO.temp$accession, ref = '6017')
+
+# differential expression analysis
+dds.full.deseq <- DESeq(dds.full)
+dds.temp.deseq <- DESeq(dds.temp)
+
+dds.NO.full.deseq <- DESeq(dds.NO.full)
+dds.NO.temp.deseq <- DESeq(dds.NO.temp)
+```
+number of DE genes
+- overall
+- per accessions
+- GxE
+split in DE, up, down. alternate NO and not-NO
+
+vuclanoplots. colour DE in red and DE in NO tests green.
+```{r contrasts}
+# overall temperature effects
+res.6vs16 <- results(dds.temp.deseq, contrast = c("temperature", "6C", "16C"))
+res.6vs16.FC2_p5 <- getDF_select_FC_padj(res.6vs16, FC = 2, padj = 0.05)
+
+res.NO.6vs16 <- results(dds.NO.temp.deseq, contrast = c("temperature", "6C", "16C"))
+res.NO.6vs16.FC2_p5 <- getDF_select_FC_padj(res.NO.6vs16, FC = 2, padj = 0.05)
+# volcanoPlot 6vs16
+volc.temp <- volcanoplot_geneSelection.double(res.6vs16.FC2_p5$gene, res.NO.6vs16.FC2_p5$gene, res.6vs16, res.NO.6vs16, names = c('w outliers', 'wo outliers')) +
+  rremove('xylab') +
+  ggtitle('6 Vs. 16')
+
+# the temperature effect for 6017 (the main effect)
+res.6017.6vs16 <- results(dds.full.deseq, contrast=c("temperature","6C","16C"))
+res.6017.6vs16.FC2_p5 <- getDF_select_FC_padj(res.6017.6vs16, FC = 2, padj = 0.05)
+
+res.NO.6017.6vs16 <- results(dds.NO.full.deseq, contrast=c("temperature","6C","16C"))
+res.NO.6017.6vs16.FC2_p5 <- getDF_select_FC_padj(res.NO.6017.6vs16, FC = 2, padj = 0.05)
+
+volc.6017 <- volcanoplot_geneSelection.double(res.6017.6vs16.FC2_p5$gene, res.NO.6017.6vs16.FC2_p5$gene, res.6017.6vs16, res.NO.6017.6vs16, names = c('w outliers', 'wo outliers')) +
+  rremove('xylab') +
+  ggtitle('6017')
+
+# the temperature effect for 9728
+res.9728.6vs16 <- results(dds.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession9728.temperature6C") ))
+res.9728.6vs16.FC2_p5 <- getDF_select_FC_padj(res.9728.6vs16, FC = 2, padj = 0.05)
+
+res.NO.9728.6vs16 <- results(dds.NO.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession9728.temperature6C") ))
+res.NO.9728.6vs16.FC2_p5 <- getDF_select_FC_padj(res.NO.9728.6vs16, FC = 2, padj = 0.05)
+
+volc.9728 <-  volcanoplot_geneSelection.double(res.9728.6vs16.FC2_p5$gene, res.NO.9728.6vs16.FC2_p5$gene, res.9728.6vs16, res.NO.9728.6vs16, names = c('w outliers', 'wo outliers')) +
+  rremove('xylab') +
+  ggtitle('9728')
+
+# the temperature effect for 9559
+res.9559.6vs16 <- results(dds.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession9559.temperature6C") ))
+res.9559.6vs16.FC2_p5 <- getDF_select_FC_padj(res.9559.6vs16, FC = 2, padj = 0.05)
+
+res.NO.9559.6vs16 <- results(dds.NO.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession9559.temperature6C") ))
+res.NO.9559.6vs16.FC2_p5 <- getDF_select_FC_padj(res.NO.9559.6vs16, FC = 2, padj = 0.05)
+
+volc.9559 <-  volcanoplot_geneSelection.double(res.9559.6vs16.FC2_p5$gene, res.NO.9559.6vs16.FC2_p5$gene, res.9559.6vs16, res.NO.9559.6vs16, names = c('w outliers', 'wo outliers')) +
+  rremove('xylab') +
+  ggtitle('9559')
+
+# the temperature effect for 6909
+res.6909.6vs16 <- results(dds.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession6909.temperature6C") ))
+res.6909.6vs16.FC2_p5 <- getDF_select_FC_padj(res.6909.6vs16, FC = 2, padj = 0.05)
+
+res.NO.6909.6vs16 <- results(dds.NO.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession6909.temperature6C") ))
+res.NO.6909.6vs16.FC2_p5 <- getDF_select_FC_padj(res.NO.6909.6vs16, FC = 2, padj = 0.05)
+
+volc.6909 <-  volcanoplot_geneSelection.double(res.6909.6vs16.FC2_p5$gene, res.NO.6909.6vs16.FC2_p5$gene, res.6909.6vs16, res.NO.6909.6vs16, names = c('w outliers', 'wo outliers')) +
+  rremove('xylab') +
+  ggtitle('6909')
+
+# the temperature effect for 8242
+res.8242.6vs16 <- results(dds.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession8242.temperature6C") ))
+res.8242.6vs16.FC2_p5 <- getDF_select_FC_padj(res.8242.6vs16, FC = 2, padj = 0.05)
+
+res.NO.8242.6vs16 <- results(dds.NO.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession8242.temperature6C") ))
+res.NO.8242.6vs16.FC2_p5 <- getDF_select_FC_padj(res.NO.8242.6vs16, FC = 2, padj = 0.05)
+
+volc.8242 <-  volcanoplot_geneSelection.double(res.8242.6vs16.FC2_p5$gene, res.NO.8242.6vs16.FC2_p5$gene, res.8242.6vs16, res.NO.8242.6vs16, names = c('w outliers', 'wo outliers')) +
+  rremove('xylab') +
+  ggtitle('8242')
+
+# the temperature effect for 9888
+res.9888.6vs16 <- results(dds.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession9888.temperature6C") ))
+res.9888.6vs16.FC2_p5 <- getDF_select_FC_padj(res.9888.6vs16, FC = 2, padj = 0.05)
+
+res.NO.9888.6vs16 <- results(dds.NO.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession9888.temperature6C") ))
+res.NO.9888.6vs16.FC2_p5 <- getDF_select_FC_padj(res.NO.9888.6vs16, FC = 2, padj = 0.05)
+
+volc.9888 <-  volcanoplot_geneSelection.double(res.9888.6vs16.FC2_p5$gene, res.NO.9888.6vs16.FC2_p5$gene, res.9888.6vs16, res.NO.9888.6vs16, names = c('w outliers', 'wo outliers')) +
+  rremove('xylab') +
+  ggtitle('9888')
+
+# the temperature effect for 9433
+res.9433.6vs16 <- results(dds.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession9433.temperature6C") ))
+res.9433.6vs16.FC2_p5 <- getDF_select_FC_padj(res.9433.6vs16, FC = 2, padj = 0.05)
+
+res.NO.9433.6vs16 <- results(dds.NO.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession9433.temperature6C") ))
+res.NO.9433.6vs16.FC2_p5 <- getDF_select_FC_padj(res.NO.9433.6vs16, FC = 2, padj = 0.05)
+
+volc.9433 <-  volcanoplot_geneSelection.double(res.9433.6vs16.FC2_p5$gene, res.NO.9433.6vs16.FC2_p5$gene, res.9433.6vs16, res.NO.9433.6vs16, names = c('w outliers', 'wo outliers')) +
+  rremove('xylab') +
+  ggtitle('9433')
+
+# the temperature effect for 9075
+res.9075.6vs16 <- results(dds.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession9075.temperature6C") ))
+res.9075.6vs16.FC2_p5 <- getDF_select_FC_padj(res.9075.6vs16, FC = 2, padj = 0.05)
+
+res.NO.9075.6vs16 <- results(dds.NO.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession9075.temperature6C") ))
+res.NO.9075.6vs16.FC2_p5 <- getDF_select_FC_padj(res.NO.9075.6vs16, FC = 2, padj = 0.05)
+
+volc.9075 <-  volcanoplot_geneSelection.double(res.9075.6vs16.FC2_p5$gene, res.NO.9075.6vs16.FC2_p5$gene, res.9075.6vs16, res.NO.9075.6vs16, names = c('w outliers', 'wo outliers')) +
+  rremove('xylab') +
+  ggtitle('9075')
+
+# temperature x genotype effect
+dds.GxE <- estimateSizeFactors(dds.full)
+dds.GxE <- estimateDispersions(dds.GxE)
+dds.GxE <- nbinomLRT(dds.GxE, full = ~ replicate + accession + temperature + replicate:temperature + accession:temperature, reduced = ~ replicate + accession + temperature + replicate:temperature)
+res.GxE <- results(dds.GxE)
+res.GxE.FC0_p5 <- getDF_select_FC_padj(res.GxE, FC = 0, padj = 0.05)
+
+dds.NO.GxE <- estimateSizeFactors(dds.NO.full)
+dds.NO.GxE <- estimateDispersions(dds.NO.GxE)
+dds.NO.GxE <- nbinomLRT(dds.NO.GxE, full = ~ replicate + accession + temperature + replicate:temperature + accession:temperature, reduced = ~ replicate + accession + temperature + replicate:temperature)
+res.NO.GxE <- results(dds.NO.GxE)
+res.NO.GxE.FC0_p5 <- getDF_select_FC_padj(res.NO.GxE, FC = 0, padj = 0.05)
+
+volc <- ggarrange(volc.temp, volc.6017, volc.9728, volc.9559, volc.6909, volc.8242, volc.9888, volc.9433, volc.9075,
+          common.legend = T, legend = 'right')
+pdf('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Transcriptome/Plots/DE_withVSwithoutOutlierSamples.pdf')
+annotate_figure(volc, bottom = 'log2 fold change', left = text_grob('-log10(pval)', rot = 90))
+dev.off()
+```
+
+```{r DE table}
+DE.summary <- data.frame(contrast = c('6VS16', as.character(unique(samples$accession)), 'GxE'))
+res.list <- list(res.6vs16.FC2_p5, res.6017.6vs16.FC2_p5, res.9728.6vs16.FC2_p5, res.9559.6vs16.FC2_p5, res.6909.6vs16.FC2_p5, res.8242.6vs16.FC2_p5, res.9888.6vs16.FC2_p5, res.9433.6vs16.FC2_p5, res.9075.6vs16.FC2_p5, res.GxE.FC0_p5, res.NO.6vs16.FC2_p5, res.NO.6017.6vs16.FC2_p5, res.NO.9728.6vs16.FC2_p5, res.NO.9559.6vs16.FC2_p5, res.NO.6909.6vs16.FC2_p5, res.NO.8242.6vs16.FC2_p5, res.NO.9888.6vs16.FC2_p5, res.NO.9433.6vs16.FC2_p5, res.NO.9075.6vs16.FC2_p5, res.NO.GxE.FC0_p5)
+names(res.list) <- c(DE.summary$contrast, paste(DE.summary$contrast, 'no_outlier', sep = '_'))
+
+for (cntr in DE.summary$contrast)
+{
+  res <- res.list[[cntr]]
+  res.NO <-res.list[[paste(cntr, 'no_outlier', sep = '_')]]
+  DE.summary$DE[DE.summary$contrast == cntr] <- dim(res)[1]
+  DE.summary$DE_no_outliers[DE.summary$contrast == cntr] <- dim(res.NO)[1]
+  
+  DE.summary$up[DE.summary$contrast == cntr] <- dim(res[res$log2FoldChange > 0, ])[1]
+  DE.summary$up_no_outliers[DE.summary$contrast == cntr] <- dim(res.NO[res.NO$log2FoldChange > 0, ])[1]
+  
+  DE.summary$down[DE.summary$contrast == cntr] <- dim(res[res$log2FoldChange < 0, ])[1]
+  DE.summary$down_no_outliers[DE.summary$contrast == cntr] <- dim(res.NO[res.NO$log2FoldChange < 0, ])[1]
+}
+
+DE.summary
+```
+
+
+
+
