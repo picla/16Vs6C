@@ -84,13 +84,49 @@ meanSdPlot(assay(dds.varStab))
 
 
 
+```{r PCA - no batch correction}
+pcaData <- plotPCA(dds.varStab, intgroup=c("replicate", "accession"), returnData=T, ntop = 30000)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+pca.default <- ggplot(pcaData, aes(PC1, PC2, color=replicate, shape=accession)) +
+  geom_point(size=3) +
+  scale_shape_manual(values=c(15, 19, 17, 18, 4, 8, 9, 11)) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  coord_fixed()
+
+pca.default
+```
 ```{r remove batch effect}
 dds.varStab.NB <- dds.varStab
-assay(dds.varStab.NB) <- removeBatchEffect(assay(dds.varStab.NB), dds.varStab.NB$experiment)
+design <- model.matrix(~ dds.varStab.NB$accession+dds.varStab.NB$temperature+dds.varStab.NB$temperature:dds.varStab.NB$accession)
+assay(dds.varStab.NB) <- removeBatchEffect(assay(dds.varStab.NB), batch = dds.varStab.NB$replicate, design = design)
 ```
 
+
+```{r PCA - replicate effect correction}
+pcaData <- plotPCA(dds.varStab.NB, intgroup=c("replicate", "accession"), returnData=T, ntop = 30000)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+pca.default <- ggplot(pcaData, aes(PC1, PC2, color=replicate, shape=accession)) +
+  geom_point(size=3) +
+  scale_shape_manual(values=c(15, 19, 17, 18, 4, 8, 9, 11)) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  coord_fixed()
+
+pca.default
+```
+
+The batch effect si not very strong. rep1 samples are in both temperatures a bit lower along PC2. But PC2 is also forming a gradient for genotypes.
+Correcting for replicate effect is possible with limma:removeBatchEffects but is not 100% correct.
+repX in 6°C and repX in 16°C are in principle independent (although for rep1 there seems a slight dependency). 
+The best correction would be to correct for experiment effect. This entirely confounds with temperature and is not accepted by limma it seems.
+Therefore we deciced to not correct for replicate effect here. since it does not seem to be a confounder and we do not know what the removal is exactly doing to the data, potentially introducing biases.
+The batch correction is kept in the differential expression though; since there we can correct for the replicate:temperature interaction which is the correct thing to do.
+
 ```{r PCA}
-pcaData <- plotPCA(dds.varStab.NB, intgroup=c("temperature", "accession"), returnData=T, ntop = 500)
+pcaData <- plotPCA(dds.varStab, intgroup=c("temperature", "accession"), returnData=T, ntop = 500)
 percentVar <- round(100 * attr(pcaData, "percentVar"))
 
 pca.default <- ggplot(pcaData, aes(PC1, PC2, color=temperature, shape=accession)) +
@@ -110,7 +146,7 @@ pca.default
 
 ## Why is Col-0 an outlier?
 ```{r PCA - Col-outlier}
-pcaData <- plotPCA(dds.varStab.NB, intgroup=c("temperature", "accession"), returnData=T, ntop = 50)
+pcaData <- plotPCA(dds.varStab, intgroup=c("temperature", "accession"), returnData=T, ntop = 50)
 percentVar <- round(100 * attr(pcaData, "percentVar"))
 
 pca.ntop50 <- ggplot(pcaData, aes(PC1, PC2, color=temperature, shape=accession)) +
@@ -127,7 +163,7 @@ pca.ntop50
 ```
 
 ```{r PCA}
-pcaData <- plotPCA(dds.varStab.NB, intgroup=c("temperature", "accession"), returnData=T, ntop = length(dds.varStab.NB))
+pcaData <- plotPCA(dds.varStab, intgroup=c("temperature", "accession"), returnData=T, ntop = length(dds.varStab.NB))
 percentVar <- round(100 * attr(pcaData, "percentVar"))
 
 pca.fulldata <- ggplot(pcaData, aes(PC1, PC2, color=temperature, shape=accession)) +
@@ -152,7 +188,7 @@ We'll plot the deviation from the overall mean for each gene. one plot per tempe
 -> start with 50 genes.
 ```{r deviation}
 # calculate the variance for each gene
-rv <- rowVars(assay(dds.varStab.NB))
+rv <- rowVars(assay(dds.varStab))
 
 # select the ntop = 500 genes by variance
 select <- order(rv, decreasing=TRUE)[seq_len(min(50, length(rv)))]
@@ -223,13 +259,13 @@ check the other principal components.
 ```{r PCA beyond PC2}
 ntop = 500
 # calculate the variance for each gene
-rv <- rowVars(assay(dds.varStab.NB))
+rv <- rowVars(assay(dds.varStab))
 
 # select the ntop genes by variance
 select <- order(rv, decreasing=TRUE)[seq_len(min(ntop, length(rv)))]
 
 # perform a PCA on the data in assay(x) for the selected genes
-pca <- prcomp(t(assay(dds.varStab.NB)[select,]))
+pca <- prcomp(t(assay(dds.varStab)[select,]))
 
 # the contribution to the total variance for each component
 percentVar <- pca$sdev^2 / sum( pca$sdev^2 )
@@ -280,13 +316,13 @@ PCA.all
 ```{r PCA beyond PC2 - all data}
 ntop = 30000
 # calculate the variance for each gene
-rv <- rowVars(assay(dds.varStab.NB))
+rv <- rowVars(assay(dds.varStab))
 
 # select the ntop genes by variance
 select <- order(rv, decreasing=TRUE)[seq_len(min(ntop, length(rv)))]
 
 # perform a PCA on the data in assay(x) for the selected genes
-pca <- prcomp(t(assay(dds.varStab.NB)[select,]))
+pca <- prcomp(t(assay(dds.varStab)[select,]))
 
 # the contribution to the total variance for each component
 percentVar <- pca$sdev^2 / sum( pca$sdev^2 )
