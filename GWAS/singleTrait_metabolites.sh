@@ -20,7 +20,7 @@ GENO=/scratch-cbe/users/pieter.clauw/genotypes_for_pygwas/1.0.0/1001genomes/
 OUT=/scratch-cbe/users/pieter.clauw/16vs6/Results/Metabolites/GWAS/SingleTrait/                                                                                      
 awk -F ',' -v OFS=',' -v col="$i" '{print $1,$col}' $allphenotypes > $PHENO
 
-LMX=~/GitRepos/BOKU_collab/Scripts/singleloc.py
+LMX=~/GitRepos/GWAStoolbox/Limix/singletrait.py  BOKU_collab/Scripts/singleloc.py
 
 python $LMX -p $PHENO -g $GENO -m 0.05 -o $OUT
 
