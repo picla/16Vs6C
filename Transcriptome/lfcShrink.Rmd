@@ -1,0 +1,317 @@
+---
+title: "lfcShrink"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(stringr)
+library(tidyverse)
+library(ggpubr)
+library(tximport)
+library(DESeq2)
+library(vsn)
+library(viridis)
+library(ggdendro)
+library(gridExtra)
+library(gtable)
+library(grid)
+library(pheatmap)
+library(limma)
+library(topGO)
+source('diffExpr_functions.r')
+source('../../coExpression/Scripts/Rfunctions.r')
+source('/groups/nordborg/pub/1001T/AraEnrich/main.R')
+knitr::opts_knit$set(root.dir = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/')
+```
+
+```{r data}
+# RNA-seq samples
+samples <- read_delim('/groups/nordborg/projects/cegs/16Vs6C/Data/Transcriptome/RawData/samples.txt', delim = '\t')
+
+# expression data
+Araport11 <- read.table('/groups/nordborg/user/pieter.clauw/Documents/Source/Araport11/Araport11_GFF3_genes_transposons.201606.ChrM_ChrC_FullName.gtf', sep = '\t')
+```
+
+```{r prepare}
+# filter only sequenced samples
+samples <- filter(samples, Selected == 'yes') %>%
+  mutate(accession = as.factor(accession),
+         temperature = as.factor(temperature),
+         replicate = as.factor(replicate),
+         experiment = as.factor(paste(temperature, replicate, sep = '_')),
+         ID = paste(tray, tray_coordinate, temperature, replicate, sep = '_'),
+         sampleName = paste(accession, temperature, replicate, sep = '_'))
+
+# Araport11
+colnames(Araport11) <- c('chr', 'source', 'feature', 'start', 'end', 'score', 'strand', 'frame', 'attributes')
+Araport11$attributes <- as.character(Araport11$attributes)
+Araport11[,9:10] <- str_split_fixed(Araport11$attributes, ';', 3)[,1:2]
+Araport11$V10 <- sub(".*id ", "", Araport11$V10)
+```
+
+```{r functions}
+get_HighFC_counts <- function(name, resLst = res.6vs16.ashr.acn, dds = dds.full.deseq)
+{
+  res <- resLst[[name]]
+  highFC <- as_tibble(res, rownames = 'gene') %>%
+    filter(abs(log2FoldChange) >=10)
+  highFC.cnts <- as_tibble(t(counts(dds[highFC$gene])), rownames = 'sample') %>%
+    left_join(., samples[, c('sample', 'accession', 'temperature', 'replicate')], by = 'sample') %>%
+    filter(accession == !!name) %>%
+    dplyr::select(sample, temperature, accession, replicate, everything()) %>%
+    arrange(temperature, accession)
+  return(highFC.cnts)
+}
+```
+
+
+```{r expression data}
+# data
+expression.files <- file.path('/groups/nordborg/projects/cegs/16Vs6C/Results/SalmonQuant/', samples$basename, '' ,'_quasiMap_pseudoG_Trimmed/quant.sf', fsep = '')
+names(expression.files) <- samples$sample
+
+# transcript <-> gene
+tx2gene <- data.frame('transcriptID' = sub(".*id ", "", Araport11$attributes), 'geneID' = Araport11$V10)
+
+# import salmon quantification data
+samples.acn1 <- samples$sample[samples$accession %in% unique(samples$accession)[1]]
+txi <- tximport(expression.files[samples.acn1], tx2gene = tx2gene, type = 'salmon', dropInfReps = T)
+for (acn in unique(samples$accession)[-1])
+{
+  samples.acn <- samples$sample[samples$accession %in% acn]
+  txi.acn <- tximport(expression.files[samples.acn], tx2gene = tx2gene, type = 'salmon', dropInfReps = T)
+  # use overlapping genes
+  idx <- intersect(rownames(txi$counts), rownames(txi.acn$counts))
+  txi$abundance <- cbind(txi$abundance[idx, ], txi.acn$abundance[idx, ])
+  txi$counts <- cbind(txi$counts[idx, ], txi.acn$counts[idx, ])
+  txi$length <- cbind(txi$length[idx, ], txi.acn$length[idx, ])
+}
+
+#match Colnames with samples order
+txi$abundance <- txi$abundance[ ,samples$sample]
+txi$counts <- txi$counts[ ,samples$sample]
+txi$length <- txi$length[ ,samples$sample]
+```
+
+```{r create DESeq DataSet}
+dds.full <- DESeqDataSetFromTximport(txi, colData = samples, design = ~  replicate + accession + temperature + replicate:temperature + accession:temperature)
+dds.temp <- DESeqDataSetFromTximport(txi, colData = samples, design = ~  replicate + temperature + replicate:temperature)
+# broad filter
+idx <- rowSums(counts(dds.full) >= 10 ) >= nrow(samples) * 0.1
+dds.full <- dds.full[idx,]
+dds.temp <- dds.temp[idx,]
+```
+
+```{r differential expression}
+# broad filter
+idx <- rowSums(counts(dds.full) >= 10 ) >= nrow(samples) * 0.1
+dds.full.filter <- dds.full[idx,]
+# DE analysis over all accessions
+# set reference condition
+dds.full$temperature <- relevel(dds.full$temperature, ref = "16C")
+dds.full$accession <- relevel(dds.full$accession, ref = '6017')
+dds.temp$temperature <- relevel(dds.full$temperature, ref = "16C")
+
+# regular estimateSizeFactors returns NULL for some reason.
+dds.temp$sizeFactor <- estimateSizeFactorsForMatrix(assay(dds.temp))
+dds.full$sizeFactor <- estimateSizeFactorsForMatrix(assay(dds.full))
+
+# differential expression analysis
+dds.full.deseq <- DESeq(dds.full)
+dds.temp.deseq <- DESeq(dds.temp)
+```
+
+Shrink the effect size estimates based on beta prior.
+The used method is ashr, as it is the only method that can handle interactions and shrinking estimates of contrasts within groups.
+
+```{r lfcshrink}
+# 6vs 16 over all accessions
+res.6vs16 <- results(dds.temp.deseq, contrast = c("temperature", "6C", "16C"))
+res.6vs16.apeglm <- lfcShrink(dds.temp.deseq, type = 'apeglm', coef = 'temperature_6C_vs_16C')
+res.6vs16.ashr <- lfcShrink(dds.temp.deseq, type = 'ashr', contrast = c('temperature', '6C', '16C'))
+
+res.6vs16.FC2_p5 <- as_tibble(res.6vs16, rownames = 'gene') %>%
+  filter(abs(log2FoldChange) >= 2, padj < 0.05)
+
+res.6vs16.ashr.FC2_p5 <- as_tibble(res.6vs16.ashr, rownames = 'gene') %>%
+  # filter out all log2FC == 0 (contain significant pvalues)
+  filter(log2FoldChange != 0) %>%
+  filter(abs(log2FoldChange) >= 2, padj < 0.05)
+
+volcanoplot_geneSelection(res.6vs16.FC2_p5$gene, res.6vs16, main = '6vs16', FC = 2, padj = 0.05)
+volcanoplot_geneSelection(res.6vs16.ashr.FC2_p5$gene, res.6vs16.ashr, main = '6vs16', FC = 2, padj = 0.05)
+
+# the temperature effect for 6017 (the main effect)
+res.6017.6vs16 <- results(dds.full.deseq, contrast = c("temperature", "6C", "16C"))
+res.6017.6vs16.ashr <- lfcShrink(dds.full.deseq, type = 'ashr', contrast = c("temperature", "6C", "16C"))
+
+res.6017.6vs16.ashr.FC2_p5 <- as_tibble(res.6017.6vs16.ashr, rownames = 'gene') %>%
+  # filter out all log2FC == 0 (contain significant pvalues)
+  filter(log2FoldChange != 0) %>%
+  filter(abs(log2FoldChange) >= 2, padj < 0.05)
+
+volcanoplot_geneSelection(res.6017.6vs16.ashr.FC2_p5$gene, res.6017.6vs16.ashr, main = '6vs16 in 6017', FC = 2, padj = 0.05)
+
+# the temperature effect for 9728
+# this is the main effect *plus* the interaction term
+# (the extra condition effect in 9728 compared to 6017).
+res.9728.6vs16 <- results(dds.full.deseq, contrast = list( c("temperature_6C_vs_16C", "accession9728.temperature6C")))
+res.9728.6vs16.ashr <- lfcShrink(dds.full.deseq, type = 'ashr', contrast=list( c("temperature_6C_vs_16C","accession9728.temperature6C")))
+
+res.9728.6vs16.ashr.FC2_p5 <- as_tibble(res.9728.6vs16.ashr, rownames = 'gene') %>%
+  filter(abs(log2FoldChange) >= 2, padj < 0.05)
+
+res.9728.6vs16.FC2_p5 <- as_tibble(res.9728.6vs16, rownames = 'gene') %>%
+  filter(abs(log2FoldChange) >= 2, padj < 0.05)
+
+volcanoplot_geneSelection(res.9728.6vs16.ashr.FC2_p5$gene, res.9728.6vs16.ashr, main = '6vs16 in 9728', FC = 2, padj = 0.05)
+
+# the temperature effect for 9559
+# this is the main effect *plus* the interaction term
+# (the extra condition effect in 9559 compared to 6017).
+res.9559.6vs16 <- results(dds.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession9559.temperature6C") ))
+res.9559.6vs16.ashr <- lfcShrink(dds.full.deseq, type = 'ashr', contrast=list( c("temperature_6C_vs_16C","accession9559.temperature6C")))
+
+res.9559.6vs16.FC2_p5 <- as_tibble(res.9559.6vs16, rownames = 'gene') %>%
+  filter(abs(log2FoldChange) >= 2, padj < 0.05)
+
+res.9559.6vs16.ashr.FC2_p5 <- as_tibble(res.9559.6vs16.ashr, rownames = 'gene') %>%
+  filter(abs(log2FoldChange) >= 2, padj < 0.05)
+
+volcanoplot_geneSelection(res.9559.6vs16.FC2_p5$gene, res.9559.6vs16, main = '6vs16 in 9559', FC = 1.5, padj = 0.1)
+volcanoplot_geneSelection(res.9559.6vs16.ashr.FC2_p5$gene, res.9559.6vs16.ashr, main = '6vs16 in 9559', FC = 1.5, padj = 0.1)
+
+# the temperature effect for 6909.
+# this is the main effect *plus* the interaction term
+# (the extra condition effect in 6909 compared to 6017).
+res.6909.6vs16 <- results(dds.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession6909.temperature6C") ))
+res.6909.6vs16.ashr <- lfcShrink(dds.full.deseq, type = 'ashr', contrast=list( c("temperature_6C_vs_16C","accession6909.temperature6C")))
+
+res.6909.6vs16.FC2_p5 <- as_tibble(res.6909.6vs16, rownames = 'gene') %>%
+  filter(abs(log2FoldChange) >= 2, padj < 0.05)
+
+res.6909.6vs16.ashr.FC2_p5 <- as_tibble(res.6909.6vs16.ashr, rownames = 'gene') %>%
+  filter(abs(log2FoldChange) >= 2, padj < 0.05)
+
+volcanoplot_geneSelection(res.6909.6vs16.FC2_p5$gene, res.6909.6vs16, main = '6vs16 in 6909', FC = 1.5, padj = 0.1)
+volcanoplot_geneSelection(res.6909.6vs16.ashr.FC2_p5$gene, res.6909.6vs16.ashr, main = '6vs16 in 6909', FC = 1.5, padj = 0.1)
+
+# the temperature effect for 8242
+# this is the main effect *plus* the interaction term
+# (the extra condition effect in 8242 compared to 6017).
+res.8242.6vs16 <- results(dds.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession8242.temperature6C") ))
+res.8242.6vs16.ashr <- lfcShrink(dds.full.deseq, type = 'ashr', contrast=list( c("temperature_6C_vs_16C","accession8242.temperature6C")))
+
+res.8242.6vs16.FC2_p5 <- as_tibble(res.8242.6vs16, rownames = 'gene') %>%
+  filter(abs(log2FoldChange) >= 2, padj < 0.05)
+
+res.8242.6vs16.ashr.FC2_p5 <- as_tibble(res.8242.6vs16.ashr, rownames = 'gene') %>%
+  filter(abs(log2FoldChange) >= 2, padj < 0.05)
+
+volcanoplot_geneSelection(res.8242.6vs16.FC2_p5$gene, res.8242.6vs16, main = '6vs16 in 8242', FC = 1.5, padj = 0.1)
+volcanoplot_geneSelection(res.8242.6vs16.ashr.FC2_p5$gene, res.8242.6vs16.ashr, main = '6vs16 in 8242', FC = 1.5, padj = 0.1)
+
+# the temperature effect for 9888
+# this is the main effect *plus* the interaction term
+# (the extra condition effect in 9888 compared to 6017).
+res.9888.6vs16 <- results(dds.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession9888.temperature6C") ))
+res.9888.6vs16.ashr <- lfcShrink(dds.full.deseq, type = 'ashr', contrast=list( c("temperature_6C_vs_16C","accession9888.temperature6C")))
+
+res.9888.6vs16.FC2_p5 <- as_tibble(res.9888.6vs16, rownames = 'gene') %>%
+  filter(abs(log2FoldChange) >= 2, padj < 0.05)
+
+res.9888.6vs16.ashr.FC2_p5 <- as_tibble(res.9888.6vs16.ashr, rownames = 'gene') %>%
+  filter(abs(log2FoldChange) >= 2, padj < 0.05)
+
+volcanoplot_geneSelection(res.9888.6vs16.FC2_p5$gene, res.9888.6vs16, main = '6vs16 in 9888', FC = 1.5, padj = 0.1)
+volcanoplot_geneSelection(res.9888.6vs16.ashr.FC2_p5$gene, res.9888.6vs16.ashr, main = '6vs16 in 9888', FC = 1.5, padj = 0.1)
+
+
+# the temperature effect for 9433
+# this is the main effect *plus* the interaction term
+# (the extra condition effect in 9433 compared to 6017).
+res.9433.6vs16 <- results(dds.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession9433.temperature6C") ))
+res.9433.6vs16.ashr <- lfcShrink(dds.full.deseq, type = 'ashr', contrast=list( c("temperature_6C_vs_16C","accession9433.temperature6C")))
+
+res.9433.6vs16.FC2_p5 <- as_tibble(res.9433.6vs16, rownames = 'gene') %>%
+  filter(abs(log2FoldChange) >= 2, padj < 0.05)
+
+res.9433.6vs16.ashr.FC2_p5 <- as_tibble(res.9433.6vs16.ashr, rownames = 'gene') %>%
+  filter(abs(log2FoldChange) >= 2, padj < 0.05)
+
+volcanoplot_geneSelection(res.9433.6vs16.FC2_p5$gene, res.9433.6vs16, main = '6vs16 in 9433', FC = 1.5, padj = 0.1)
+volcanoplot_geneSelection(res.9433.6vs16.ashr.FC2_p5$gene, res.9433.6vs16.ashr, main = '6vs16 in 9433', FC = 1.5, padj = 0.1)
+
+# the temperature effect for 9075
+# this is the main effect *plus* the interaction term
+# (the extra condition effect in 9075 compared to 6017).
+res.9075.6vs16 <- results(dds.full.deseq, contrast=list( c("temperature_6C_vs_16C","accession9075.temperature6C") ))
+res.9075.6vs16.ashr <- lfcShrink(dds.full.deseq, type = 'ashr', contrast=list( c("temperature_6C_vs_16C","accession9075.temperature6C")))
+
+res.9075.6vs16.FC2_p5 <- as_tibble(res.9075.6vs16, rownames = 'gene') %>%
+  filter(abs(log2FoldChange) >= 2, padj < 0.05)
+
+res.9075.6vs16.ashr.FC2_p5 <- as_tibble(res.9075.6vs16.ashr, rownames = 'gene') %>%
+  filter(abs(log2FoldChange) >= 2, padj < 0.05)
+
+volcanoplot_geneSelection(res.9075.6vs16.FC2_p5$gene, res.9075.6vs16, main = '6vs16 in 9075', FC = 1.5, padj = 0.1)
+volcanoplot_geneSelection(res.9075.6vs16.ashr.FC2_p5$gene, res.9075.6vs16.ashr, main = '6vs16 in 9075', FC = 1.5, padj = 0.1)
+
+# list per accession results
+res.6vs16.ashr.acn <- list(res.6017.6vs16.ashr, res.9728.6vs16.ashr, res.9559.6vs16.ashr, res.6909.6vs16.ashr, res.8242.6vs16.ashr, res.9888.6vs16.ashr, res.9433.6vs16.ashr, res.9075.6vs16.ashr)
+names(res.6vs16.ashr.acn) <- c('6017', '9728', '9559', '6909', '8242', '9888', '9433', '9075')
+```
+
+```{r check exteme log2FC}
+# 6vs16
+highFC.6vs16 <- as_tibble(res.6vs16.ashr, rownames = 'gene') %>%
+   filter(abs(log2FoldChange) >= 10)
+
+highFC.6vs16.cnts <- as_tibble(t(counts(dds.temp.deseq[highFC.6vs16$gene])), rownames = 'sample') %>%
+  left_join(., samples[, c('sample', 'accession', 'temperature', 'replicate')], by = 'sample') %>%
+  dplyr::select(sample, temperature, accession, replicate, everything()) %>%
+  arrange(temperature, accession)
+
+# 6vs16 within accessions
+highFC.cnts.acn <- lapply(names(res.6vs16.ashr.acn), get_HighFC_counts)
+names(highFC.cnts.acn) <- names(res.6vs16.ashr.acn)
+```
+a lot of genes with extreme log2FCs have very few counts in all samples across temperatures, within an accession.
+Solution: filter out genes with
+
+do post filtering of genes with less than 10 reads in more than half of the samples.
+this keep genes with 0 reads in one temperature and more than 10 reads in the other temperature.
+
+```{r filter}
+
+geneFilter <- function(name, highFC.cnts.lst = highFC.cnts.acn, resLst = res.6vs16.ashr.acn)
+{
+  filt.genes <- highFC.cnts.lst[[name]] %>%
+    dplyr::select(matches('AT.G.{5}')) %>%
+    summarise(across(everything(), function(cnts){length(cnts[which(cnts >= 10)])})) %>%
+    pivot_longer(cols = everything(), names_to = 'gene', values_to = 'over_ten') %>%
+    filter(over_ten < 3) %>%
+    .$gene
+  res <- resLst[[name]]
+  res.filt <- res[!rownames(res) %in% filt.genes, ]
+  return(res.filt)
+}
+
+
+res.6vs16.acn.filtered <- lapply(names(highFC.cnts.acn), geneFilter)
+names(res.6vs16.acn.filtered) <- names(res.6vs16.ashr.acn)
+
+for(name in names(res.6vs16.acn.filtered))
+{
+  res.FC1.5_p10 <- as_tibble(res.6vs16.acn.filtered[[name]], rownames = 'gene') %>%
+    filter(abs(log2FoldChange) >= 1.5, padj < 0.1)
+  
+  print(volcanoplot_geneSelection(res.FC1.5_p10$gene, res.6vs16.acn.filtered[[name]], main = name, FC = 1.5, padj = 0.1))
+}
+
+```
+
+
+
