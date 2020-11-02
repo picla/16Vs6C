@@ -1,0 +1,457 @@
+---
+title: "differentialExpression"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(tidyverse)
+library(ggpubr)
+library(tximport)
+library(DESeq2)
+library(vsn)
+library(ggdendro)
+library(wesanderson)
+library(cowplot)
+library(topGO)
+library(viridis)
+source('diffExpr_functions.r')
+source('../../coExpression/Scripts/Rfunctions.r')
+knitr::opts_knit$set(root.dir = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/')
+```
+
+```{r data}
+# RNA-seq samples
+samples <- read_delim('/groups/nordborg/projects/cegs/16Vs6C/Data/Transcriptome/RawData/samples.txt', delim = '\t')
+# worldclim data
+worldclim <- read_csv('/groups/nordborg/user/pieter.clauw/Documents/Source/Accessions/2029_modified_MN_SH_wc2.0_30s_bilinear.csv')
+meta <- read_csv('/groups/nordborg/user/pieter.clauw/Documents/Source/Accessions/A.thaliana_master_accession_list_011215.csv')
+
+# expression data
+Araport11 <- read.table('/groups/nordborg/user/pieter.clauw/Documents/Source/Araport11/Araport11_GFF3_genes_transposons.201606.ChrM_ChrC_FullName.gtf', sep = '\t')
+
+# CBF regulon according Vogel et al., 2015
+CBF_up <- read_csv('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Transcriptome/VogelEtAl2015/CBF2_upregulated_table7.csv')
+CBF_down <- read_csv('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Transcriptome/VogelEtAl2015/CBF2_downregulated_table8.csv')
+
+# gene lists
+# CBF and CAMTA transcription factors
+CBF.TF <- c('AT4G25490', 'AT4G25470', 'AT4G25480', 'AT5G51990')
+CAMTA.TF <- c('AT5G09410', 'AT5G64220', 'AT2G22300')
+
+# ZAT10 network as described in Andras Bittner, 2020
+ZAT10.ntwrk <- c('AT1G27730', 'AT3G15880', 'AT3G45640', 'AT2G43790', 'AT1G15750', 'AT4G11280', 'AT5G59820', 'AT5G04340', 'AT4G27280', 'AT2G38470', 'AT5G61600', 'AT3G53600', 'At4g24570', 'AT2G37430', 'AT1G80840', 'AT4G17490', 'AT4G29780', 'AT3G10930', 'AT3G61190', 'AT2G44840', 'AT2G28200')
+
+# GO background
+load('/groups/nordborg/pub/forPieter/WGCNA/WGCNA_8acn/GeneUniverse&Annotation.RData')
+```
+
+```{r prepare}
+# filter only sequenced samples
+samples <- filter(samples, Selected == 'yes') %>%
+  mutate(temperature = as.factor(temperature),
+         replicate = as.factor(replicate),
+         experiment = as.factor(paste(temperature, replicate, sep = '_')),
+         ID = paste(tray, tray_coordinate, temperature, replicate, sep = '_'),
+         sampleName = paste(accession, temperature, replicate, sep = '_')) %>%
+  left_join(., worldclim[, c('accession', 'bio_11')], by = 'accession') %>%
+  mutate(accession = as.factor(accession))
+
+# worldclim
+worldclim <- mutate(worldclim, accession = as.factor(accession))
+
+# Araport11 GTF
+colnames(Araport11) <- c('chr', 'source', 'feature', 'start', 'end', 'score', 'strand', 'frame', 'attributes')
+Araport11$attributes <- as.character(Araport11$attributes)
+Araport11[,9:10] <- str_split_fixed(Araport11$attributes, ';', 3)[,1:2]
+Araport11$V10 <- sub(".*id ", "", Araport11$V10)
+
+# CBF
+CBF_down <- mutate(CBF_down, direction = 'down')
+CBF_up <- mutate(CBF_up, direction = 'up')
+CBF <- bind_rows(CBF_down, CBF_up) %>%
+  mutate(AGI = toupper(AGI))
+
+# acclimation gene lists
+accl.genes <- filter(CBF, coldResponsive == 'x') %>%
+  dplyr::select(gene = AGI) %>%
+  mutate(set = 'CBF_regulon') %>%
+  add_row(gene = CBF.TF, set = 'CBF_TF') %>%
+  add_row(gene = CAMTA.TF, set = 'CAMTA_TF') %>%
+  add_row(gene = ZAT10.ntwrk, set = 'ZAT10_network') %>%
+  filter(!(gene == 'AT4G25470' & set == 'CBF_regulon')) %>%
+  filter(!(gene == 'AT5G04340' & set == 'ZAT10_network'))
+```
+```{r functions}
+# heatmap data matrix
+heatmap.matrix <- function(data.tbl, rows, columns, values)
+{
+  data.tbl.wide <- data.tbl %>%
+    dplyr::select(!!rows, !!columns, !!values) %>%
+  pivot_wider(names_from = !!columns, values_from = !!values)
+  data.tbl.mtrx <- as.matrix(data.tbl.wide[, -1])
+  rownames(data.tbl.mtrx) <- data.tbl.wide[[rows]]
+  return(data.tbl.mtrx)
+}
+
+# row dendrograms
+heatmap.dendro.row <- function(heatmap.mtrx, k, dist.method = 'euclidean', clust.method = 'ward.D2')
+{
+  clust.row <- hclust(dist(heatmap.mtrx, method = dist.method), method = clust.method)
+  dd.row <- as.dendrogram(clust.row)
+  row.ord <- order.dendrogram(dd.row)
+  ordered_row_names <- row.names(heatmap.mtrx[row.ord, ])
+  dendro_data_row <- dendro_data(dd.row, type = "rectangle")
+  
+  gene.clust <- cutree(clust.row, k = k)
+  clust.df <- data.frame(label=names(gene.clust), cluster=factor(gene.clust))
+  dendro_data_row[["labels"]]   <- merge(dendro_data_row[["labels"]],clust.df, by="label")
+  rect <- aggregate(x~cluster,label(dendro_data_row),range)
+  rect <- data.frame(rect$cluster,rect$x)
+  rect$mid <- rowMeans(rect[, c(2, 3)])
+  ymax <- mean(clust.row$height[length(clust.row$height)-((k-2):(k-1))])
+  
+  return(list('ordered_row_names' = ordered_row_names,
+              'dendro_data_row' = dendro_data_row,
+              'gene.clust' = gene.clust,
+              'rect' = rect,
+              'ymax' = ymax))
+}
+
+# col dendrograms
+heatmap.dendro.col <- function(heatmap.mtrx, dist.method = 'euclidean', clust.method = 'ward.D2')
+{
+  clust.col <- hclust(dist(t(heatmap.mtrx), method = dist.method), method = clust.method)
+  dd.col <- as.dendrogram(clust.col)
+  col.ord <- order.dendrogram(dd.col)
+  ordered_col_names <- colnames(heatmap.mtrx[, col.ord])
+  dendro_data_col <- dendro_data(dd.col, type = "rectangle")
+  return(list('ordered_col_names' = ordered_col_names,
+              'dendro_data_col' = dendro_data_col))
+}
+```
+```{r expression data}
+# data
+expression.files <- file.path('/groups/nordborg/projects/cegs/16Vs6C/Results/SalmonQuant/', samples$basename, '' ,'_quasiMap_pseudoG_Trimmed/quant.sf', fsep = '')
+names(expression.files) <- samples$sample
+
+# transcript <-> gene
+tx2gene <- data.frame('transcriptID' = sub(".*id ", "", Araport11$attributes), 'geneID' = Araport11$V10)
+
+# import salmon quantification data
+samples.acn1 <- samples$sample[samples$accession %in% unique(samples$accession)[1]]
+txi <- tximport(expression.files[samples.acn1], tx2gene = tx2gene, type = 'salmon', dropInfReps = T)
+for (acn in unique(samples$accession)[-1])
+{
+  samples.acn <- samples$sample[samples$accession %in% acn]
+  txi.acn <- tximport(expression.files[samples.acn], tx2gene = tx2gene, type = 'salmon', dropInfReps = T)
+  # use overlapping genes
+  idx <- intersect(rownames(txi$counts), rownames(txi.acn$counts))
+  txi$abundance <- cbind(txi$abundance[idx, ], txi.acn$abundance[idx, ])
+  txi$counts <- cbind(txi$counts[idx, ], txi.acn$counts[idx, ])
+  txi$length <- cbind(txi$length[idx, ], txi.acn$length[idx, ])
+}
+
+#match Colnames with samples order
+txi$abundance <- txi$abundance[ ,samples$sample]
+txi$counts <- txi$counts[ ,samples$sample]
+txi$length <- txi$length[ ,samples$sample]
+```
+
+```{r create DESeq DataSet}
+dds.full <- DESeqDataSetFromTximport(txi, colData = samples, design = ~  replicate + accession + temperature + replicate:temperature + accession:temperature)
+dds.temp <- DESeqDataSetFromTximport(txi, colData = samples, design = ~  replicate + accession + temperature + replicate:temperature)
+idx <- rowSums(counts(dds.full) >= 10 ) >= nrow(samples) * 0.1
+dds.full <- dds.full[idx,]
+dds.temp <- dds.temp[idx,]
+```
+```{r variance stabilising transformation}
+dds.varStab <- varianceStabilizingTransformation(dds.full, blind=F)
+meanSdPlot(assay(dds.varStab))
+```
+
+```{r differential expression overall accessions}
+# DE analysis over all accessions
+dds.temp$temperature <- relevel(dds.temp$temperature, ref = "16C")
+
+# regular estimateSizeFactors returns NULL for some reason.
+dds.temp$sizeFactor <- estimateSizeFactorsForMatrix(assay(dds.temp))
+dds.temp <- estimateDispersions(dds.temp)
+
+# differential expression
+dds.temp.deseq <- nbinomWaldTest(dds.temp, maxit = 1000)
+```
+
+```{r 6vs16}
+# 6vs 16 over all accessions
+res.6vs16 <- lfcShrink(dds.temp.deseq, type = 'ashr', coef = 'temperature_6C_vs_16C')
+sign.6vs16.1.5_10 <- rownames(res.6vs16[(abs(res.6vs16$log2FoldChange) >= 1.5) &(res.6vs16$padj <= 0.1), ])
+volcanoplot_geneSelection(sign.6vs16.1.5_10, res.6vs16, main = '6vs16 in 6017', FC = 1.5, padj = 0.1)
+```
+
+
+
+```{r differential expression per accession}
+# DE analysis per accession
+# set reference condition
+dds.full$temperature <- relevel(dds.full$temperature, ref = "16C")
+dds.full$accession <- relevel(dds.full$accession, ref = '6017')
+
+# regular estimateSizeFactors returns NULL for some reason.
+dds.full$sizeFactor <- estimateSizeFactorsForMatrix(assay(dds.full))
+dds.full <- estimateDispersions(dds.full)
+
+# differential expression analysis
+dds.full.deseq <- nbinomWaldTest(dds.full, maxit = 1000)
+
+# non-converged genes
+genes.nonConv <- rownames(dds.full.deseq)[!(mcols(dds.full.deseq)$betaConv)]
+
+dds.full.deseq <- dds.full.deseq[(mcols(dds.full.deseq)$betaConv)]
+```
+
+```{r 6vs16 per accession }
+# the temperature effect for 6017 (the main effect)
+res.6017.6vs16 <- lfcShrink(dds.full.deseq, type = 'ashr', coef = 'temperature_6C_vs_16C')
+sign.6017.6vs16.1.5_10 <- rownames(res.6017.6vs16[(abs(res.6017.6vs16$log2FoldChange) >= 1.5) &(res.6017.6vs16$padj <= 0.1), ])
+volcanoplot_geneSelection(sign.6017.6vs16.1.5_10, res.6017.6vs16, main = '6vs16 in 6017', FC = 1.5, padj = 0.1)
+
+# the temperature effect for 9728
+# this is the main effect *plus* the interaction term
+# (the extra condition effect in 9728 compared to 6017).
+res.9728.6vs16 <- lfcShrink(dds.full.deseq, type = 'ashr', contrast=list( c("temperature_6C_vs_16C","accession9728.temperature6C")))
+sign.9728.6vs16.1.5_10 <- rownames(res.9728.6vs16[(abs(res.9728.6vs16$log2FoldChange) >= 1.5) &(res.9728.6vs16$padj <= 0.1), ])
+volcanoplot_geneSelection(sign.9728.6vs16.1.5_10 , res.9728.6vs16, main = '6vs16 in 9728', FC = 1.5, padj = 0.1)
+
+# the temperature effect for 9559
+# this is the main effect *plus* the interaction term
+# (the extra condition effect in 9559 compared to 6017).
+res.9559.6vs16 <- lfcShrink(dds.full.deseq, type = 'ashr', contrast=list( c("temperature_6C_vs_16C","accession9559.temperature6C")))
+sign.9559.6vs16.1.5_10 <- rownames(res.9559.6vs16[(abs(res.9559.6vs16$log2FoldChange) >= 1.5) &(res.9559.6vs16$padj <= 0.1), ])
+volcanoplot_geneSelection(sign.9559.6vs16.1.5_10, res.9559.6vs16, main = '6vs16 in 9559', FC = 1.5, padj = 0.1)
+
+# the temperature effect for 6909.
+# this is the main effect *plus* the interaction term
+# (the extra condition effect in 6909 compared to 6017).
+res.6909.6vs16 <- lfcShrink(dds.full.deseq, type = 'ashr', contrast=list( c("temperature_6C_vs_16C","accession6909.temperature6C")))
+sign.6909.6vs16.1.5_10 <- rownames(res.6909.6vs16[(abs(res.6909.6vs16$log2FoldChange) >= 1.5) &(res.6909.6vs16$padj <= 0.1), ])
+volcanoplot_geneSelection(sign.6909.6vs16.1.5_10 , res.6909.6vs16, main = '6vs16 in 6909', FC = 1.5, padj = 0.1)
+
+# the temperature effect for 8242
+# this is the main effect *plus* the interaction term
+# (the extra condition effect in 8242 compared to 6017).
+res.8242.6vs16 <- lfcShrink(dds.full.deseq, type = 'ashr', contrast=list( c("temperature_6C_vs_16C","accession8242.temperature6C")))
+sign.8242.6vs16.1.5_10 <- rownames(res.8242.6vs16[(abs(res.8242.6vs16$log2FoldChange) >= 1.5) &(res.8242.6vs16$padj <= 0.1), ])
+volcanoplot_geneSelection(sign.8242.6vs16.1.5_10, res.8242.6vs16, main = '6vs16 in 8242', FC = 1.5, padj = 0.1)
+
+# the temperature effect for 9888
+# this is the main effect *plus* the interaction term
+# (the extra condition effect in 9888 compared to 6017).
+res.9888.6vs16 <- lfcShrink(dds.full.deseq, type = 'ashr', contrast=list( c("temperature_6C_vs_16C","accession9888.temperature6C")))
+res.9888.6vs16 <- res.9888.6vs16[!is.na(res.9888.6vs16$padj), ] 
+sign.9888.6vs16.1.5_10 <- rownames(res.9888.6vs16[(abs(res.9888.6vs16$log2FoldChange) >= 1.5) & (res.9888.6vs16$padj <= 0.1), ]) 
+volcanoplot_geneSelection(sign.9888.6vs16.1.5_10, res.9888.6vs16, main = '6vs16 in 9888', FC = 1.5, padj = 0.1)
+
+# the temperature effect for 9433
+# this is the main effect *plus* the interaction term
+# (the extra condition effect in 9433 compared to 6017).
+res.9433.6vs16 <- lfcShrink(dds.full.deseq, type = 'ashr', contrast=list( c("temperature_6C_vs_16C","accession9433.temperature6C")))
+sign.9433.6vs16.1.5_10 <- rownames(res.9433.6vs16[(abs(res.9433.6vs16$log2FoldChange) >= 1.5) &(res.9433.6vs16$padj <= 0.1), ])
+volcanoplot_geneSelection(sign.9433.6vs16.1.5_10, res.9433.6vs16, main = '6vs16 in 9433', FC = 1.5, padj = 0.1)
+
+# the temperature effect for 9075
+# this is the main effect *plus* the interaction term
+# (the extra condition effect in 9075 compared to 6017).
+res.9075.6vs16 <- lfcShrink(dds.full.deseq, type = 'ashr', contrast=list( c("temperature_6C_vs_16C","accession9075.temperature6C")))
+sign.9075.6vs16.1.5_10 <- rownames(res.9075.6vs16[(abs(res.9075.6vs16$log2FoldChange) >= 1.5) &(res.9075.6vs16$padj <= 0.1), ])
+volcanoplot_geneSelection(sign.9075.6vs16.1.5_10, res.9075.6vs16, main = '6vs16 in 9075', FC = 1.5, padj = 0.1)
+```
+
+```{r wilcoxon test overall 16vs6}
+counts.norm <- limma::removeBatchEffect(assay(dds.temp), batch = dds.temp$experiment)
+
+wilcox.results <- tibble('gene' = rownames(dds.full))
+
+wilcox.gene <- function(gene)
+{
+  gene.counts.a <- assay(dds.temp) %>%
+  as_tibble(rownames = 'gene') %>%
+  filter(gene == !!gene) %>%
+  pivot_longer(cols = -gene, names_to = 'sample', values_to = 'expression') %>%
+  left_join(., samples[, c('sample', 'accession', 'temperature')], by = 'sample')
+
+  w <- wilcox.test(expression ~ temperature, data = gene.counts.a)
+  return(w$p.value)
+}
+
+wilcox.results$pval <- unlist(lapply(wilcox.results$gene, wilcox.gene))
+wilcox.results$w.padj <- p.adjust(wilcox.results$pval, method = 'fdr')
+
+
+
+
+as_tibble(res.6vs16, rownames = 'gene') %>%
+  left_join(., wilcox.results, by = 'gene') %>%
+  ggplot(aes(x = -log10(padj), y = -log10(w.padj))) +
+  geom_point() +
+  geom_hline(yintercept = -log10(0.05), color = 'red') +
+  geom_vline(xintercept = -log10(0.05), color = 'red')
+```
+First tries with wilcoxon test do not give very trustable results.
+Most likey 3 replicates is not enough for wilcoxon test.
+
+
+```{r expression heatmap wilcox genes zscores}
+# make matrix
+expr.mtrx <- as_tibble(assay(dds.varStab), rownames = 'gene') %>%
+  pivot_longer(cols = -gene, names_to = 'sample', values_to = 'expression') %>%
+  group_by(gene) %>%
+  mutate(zscore = scale(expression)) %>%
+  left_join(., samples[ ,c('sample', 'accession', 'temperature', 'replicate')], by = 'sample') %>%
+  mutate(acn_temp_rep = paste(accession, temperature, replicate, sep = '_')) %>%
+  filter(gene %in% wilcox.results$gene[wilcox.results$w.padj <= 0.001]) %>%
+  heatmap.matrix(., rows = 'gene', columns = 'acn_temp_rep', values = 'expression')
+
+# make gene dendrogram
+row.dendro <- heatmap.dendro.row(expr.mtrx, k = 6)
+# make metabolite dendrogram
+col.dendro <- heatmap.dendro.col(expr.mtrx)
+
+# CBF annotation
+CBF.annot <- tibble('gene' = row.dendro$ordered_row_names) %>%
+  mutate(CBF = ifelse(gene %in% c(CBF$AGI), 'CBF.regulon', ifelse(gene %in% CBF.TF, 'CBF.TF', 'other')),
+         geneNr = c(1:length(row.dendro$ordered_row_names)))
+
+# plot heatmap
+heat_plot <- as_tibble(expr.mtrx, rownames = 'gene') %>%
+  pivot_longer(cols = -gene, names_to = 'acn_temp_rep', values_to = 'expression') %>%
+  mutate(gene = factor(gene, levels = row.dendro$ordered_row_names)) %>%
+  mutate(acn_temp_rep = factor(acn_temp_rep, levels = col.dendro$ordered_col_names)) %>%
+  ggplot(aes(x = acn_temp_rep, y = gene, fill = expression)) + 
+  geom_tile() + 
+	theme_minimal() + 
+  theme(axis.line = element_line(size = 0),
+        text = element_text(size = 10),
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5),
+        axis.text.y = element_blank()) + 
+  xlab("") + 
+	ylab("") +
+  scale_fill_viridis()
+
+
+# plot CBF annotation
+CBF_row_annot <- axis_canvas(heat_plot, axis = 'y', data = CBF.annot, mapping = aes(y = geneNr)) +
+  geom_tile(aes(x = 1, fill = CBF)) +
+  theme(legend.position = 'right', legend.direction = 'vertical', legend.title = element_blank())
+
+# create empty plot for heatmap/ CBF annotation separation
+pnull <- ggdraw()
+
+# plot row dendrogram
+dendro_row <- axis_canvas(heat_plot, axis = "y", coord_flip = TRUE) + 
+  geom_segment(data = segment(row.dendro$dendro_data_row), aes(y = -y, x = x, xend = xend, yend = -yend), size = 0.2) +
+    coord_flip() +
+  theme_dendro()
+
+# plot column dendrogram
+dendro_col <- axis_canvas(heat_plot, axis = "x") + 
+  geom_segment(data = segment(col.dendro$dendro_data_col), aes(x = x, y = y, xend = xend, yend = yend), size = 0.2)
+
+# plot heatmap
+final_plot <- heat_plot
+
+# add column dendrogram
+final_plot <- 
+  insert_xaxis_grob(final_plot, dendro_col, unit(0.2, "null"), position = "top")
+
+# add row dendrogram  with clusters to heatmap
+final_plot <- insert_yaxis_grob(
+  insert_yaxis_grob(
+    insert_yaxis_grob(
+    final_plot, dendro_row, unit(0.2, "null"), position = "left"),
+    CBF_row_annot, unit(0.02, "null"), position = 'left'),
+  pnull, unit(0.001, 'null'), position = 'left')
+    
+ggdraw(final_plot)
+```
+wilox results contain 56 out of the 198 CBF-responsive genes (incl.CBF transcription factors)
+```{r expression heatmap DESeq genes zscore}
+sign.res.6vs16 <- as_tibble(res.6vs16, rownames = 'gene') %>% filter(padj <= 0.001) %>% .$gene
+
+# make matrix
+expr.mtrx <- as_tibble(assay(dds.varStab), rownames = 'gene') %>%
+  pivot_longer(cols = -gene, names_to = 'sample', values_to = 'expression') %>%
+  group_by(gene) %>%
+  mutate(zscore = scale(expression),
+         log.expression = log(expression)) %>%
+  ungroup() %>%
+  left_join(., samples[ ,c('sample', 'accession', 'temperature', 'replicate')], by = 'sample') %>%
+  mutate(acn_temp_rep = paste(accession, temperature, replicate, sep = '_')) %>%
+  filter(gene %in% sign.res.6vs16) %>%
+  heatmap.matrix(., rows = 'gene', columns = 'acn_temp_rep', values = 'log.expression')
+
+# make gene dendrogram
+row.dendro <- heatmap.dendro.row(expr.mtrx, k = 6, clust.method = 'complete')
+# make metabolite dendrogram
+col.dendro <- heatmap.dendro.col(expr.mtrx, clust.method = 'complete')
+
+# CBF annotation
+CBF.annot <- tibble('gene' = row.dendro$ordered_row_names) %>%
+  mutate(CBF = ifelse(gene %in% c(CBF$AGI), 'CBF.regulon', ifelse(gene %in% CBF.TF, 'CBF.TF', 'other')),
+         geneNr = c(1:length(row.dendro$ordered_row_names)))
+
+# plot heatmap
+heat_plot <- as_tibble(expr.mtrx, rownames = 'gene') %>%
+  pivot_longer(cols = -gene, names_to = 'acn_temp_rep', values_to = 'log.expression') %>%
+  mutate(gene = factor(gene, levels = row.dendro$ordered_row_names)) %>%
+  mutate(acn_temp_rep = factor(acn_temp_rep, levels = col.dendro$ordered_col_names)) %>%
+  ggplot(aes(x = acn_temp_rep, y = gene, fill = log.expression)) + 
+  geom_tile() + 
+	theme_minimal() + 
+  theme(axis.line = element_line(size = 0),
+        text = element_text(size = 10),
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5),
+        axis.text.y = element_blank()) + 
+  xlab("") + 
+	ylab("") +
+  scale_fill_viridis()
+
+
+# plot CBF annotation
+CBF_row_annot <- axis_canvas(heat_plot, axis = 'y', data = CBF.annot, mapping = aes(y = geneNr)) +
+  geom_tile(aes(x = 1, fill = CBF)) +
+  theme(legend.position = 'right', legend.direction = 'vertical', legend.title = element_blank())
+
+# create empty plot for heatmap/ CBF annotation separation
+pnull <- ggdraw()
+
+# plot row dendrogram
+dendro_row <- axis_canvas(heat_plot, axis = "y", coord_flip = TRUE) + 
+  geom_segment(data = segment(row.dendro$dendro_data_row), aes(y = -y, x = x, xend = xend, yend = -yend), size = 0.2) +
+    coord_flip() +
+  theme_dendro()
+
+# plot column dendrogram
+dendro_col <- axis_canvas(heat_plot, axis = "x") + 
+  geom_segment(data = segment(col.dendro$dendro_data_col), aes(x = x, y = y, xend = xend, yend = yend), size = 0.2)
+
+# plot heatmap
+final_plot <- heat_plot
+
+# add column dendrogram
+final_plot <- 
+  insert_xaxis_grob(final_plot, dendro_col, unit(0.2, "null"), position = "top")
+
+# add row dendrogram  with clusters to heatmap
+final_plot <- insert_yaxis_grob(
+  insert_yaxis_grob(
+    insert_yaxis_grob(
+    final_plot, dendro_row, unit(0.2, "null"), position = "left"),
+    CBF_row_annot, unit(0.02, "null"), position = 'left'),
+  pnull, unit(0.001, 'null'), position = 'left')
+
+ggdraw(final_plot)
+```
+
+
