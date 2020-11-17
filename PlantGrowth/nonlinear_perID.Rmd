@@ -1,0 +1,713 @@
+---
+title: "nonlinear_perID"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(tidyverse)
+library(furrr)
+library(nlme)
+library(ggpubr)
+library(wesanderson)
+#library(brms)
+library(emmeans)
+library(gridExtra)
+library(bayesplot)
+knitr::opts_knit$set(root.dir = "/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/")
+```
+
+```{r data}
+lemna <- read_delim('Data/Growth/rawdata_combined_annotation_NO.txt', delim = '\t')
+outliers <- read_delim('Data/Growth/RawData/outlierList_nonlinear_perID.txt', delim = '\t')
+# number of accessions
+#n <- 20
+```
+
+```{r preparation}
+# data preparation #
+lemna$ID <- paste(lemna$pot, lemna$experiment, sep = '_')
+lemna$acn <- as.character(lemna$acn)
+lemna$Area[lemna$Area == 0] <- NA
+
+# only use accessions which have data for all replicates
+acns_rep1 <- unique(lemna$acn[lemna$replicate == 'rep1'])
+acns_rep2 <- unique(lemna$acn[lemna$replicate == 'rep2'])
+acns_rep3 <- unique(lemna$acn[lemna$replicate == 'rep3'])
+
+acns_rep123 <- intersect(intersect(acns_rep2, acns_rep3), acns_rep1)
+
+make_outlierIDs <- function(ID, DASlst)
+{
+  DASs <- c(0:21)
+  if(DASlst != 'all'){DASs <- strsplit(DASlst, split = ';')[[1]]}
+  outlier.ID <- paste(ID, DASs, sep = '_')
+  return (outlier.ID)
+}
+
+# prepare outlier data for filtering
+outlierIDs <- outliers %>%
+  filter(remove == 'yes') %>%
+  map2(.x = .$ID, .y = .$days, .f = ~make_outlierIDs(.x, .y)) %>%
+  unlist()
+
+
+# subset #
+lemna <- lemna %>%
+  filter(acn %in% acns_rep123) %>%
+  drop_na(Area) %>%
+  mutate(
+         ID,
+         acn = as.factor(acn),
+         experiment = as.factor(experiment),
+         temperature = as.factor(temperature),
+         replicate = as.factor(replicate),
+         DAS_decimal = DAS_decimal - 14,
+         DAS = floor(DAS_decimal),
+         Area,
+         outlierID = paste(ID, DAS, sep = '_')) %>%
+  filter(!outlierID %in% outlierIDs) %>%
+  dplyr::select(ID, acn, experiment, temperature, replicate, DAS_decimal, DAS, Area)
+
+# Area transformations
+mean.t0 <- mean(lemna$Area[lemna$DAS == 0])
+sd.t0 <- sd(lemna$Area[lemna$DAS == 0])
+lemna <- lemna %>%
+  mutate(Area.2000px = (Area/2000))
+
+# summarise metadata for each ID
+ID.meta <- lemna %>%
+  dplyr::select(ID, acn, experiment, temperature, replicate) %>%
+  distinct()
+```
+
+```{r general variables}
+temperatures <- unique(lemna$temperature)
+```
+
+
+## per individual model fitting
+### nlme
+```{r SS.pow}
+## self start function from Paine et al., 2012. Methods Ecol. Evol.
+# Self-start function for power-law fit. This self-start for this model is not provided by Pinhero and Bates (2000), so I wrote one. Unfortunately, it often does not lead to convergence. Any suggestions would be welcome
+fmla.pow <- as.formula("~(M0^(1-beta) + r*x*(1-beta))^(1/(1-beta))")
+Init.pow <- function(mCall, LHS, data){
+    xy <- sortedXyData(mCall[["x"]], LHS, data)
+    if(nrow(xy) < 4) {stop("Too few distinct x values to fit a power-law")}
+	r    <-coef(lm(log(y) ~ x, xy))[2]    # Use the slope from a log fit to the data as an initial guess for r
+	M0   <- min(xy$y)		              # Use the minimum y value as an initial guess for M0
+	beta <- 0.9	                          # give initial guess of beta as 0.9. don't use beta = 1, as it's undefined (1/0)
+    value <- c(M0, r, beta) 
+    names(value) <- mCall[c("M0", "r", "beta")]
+ 	return(value)
+	}
+SS.pow  <- selfStart(fmla.pow, initial = Init.pow, parameters = c("M0", "r", "beta"))
+```
+
+
+```{r nlsList}
+ctrl.nls <- nls.control(maxiter = 1000, warnOnly = T)
+
+fit.lis <- nlsList(Area.2000px ~ SS.pow(DAS_decimal, M0, r, beta) | ID,
+                   data = lemna,
+                   control = ctrl.nls.2)
+
+fit.lis.coef <- as_tibble(coef(fit.lis), rownames = 'ID') %>%
+  left_join(ID.meta, by = 'ID') %>%
+  dplyr::select(ID, acn, experiment, temperature, replicate, M0, r, beta)
+
+save(fit.lis, file = '/scratch-cbe/users/pieter.clauw/16vs6/Results/Growth/nonlinear/perID/models/nlme/fit.lis.rda')
+save(fit.lis.coef, file = '/scratch-cbe/users/pieter.clauw/16vs6/Results/Growth/nonlinear/perID/models/nlme/fit.lis.coef.rda')
+```
+
+```{r results nlsList}
+M0.hist <- fit.lis.coef %>% 
+  ggplot(aes(x = M0, fill = temperature)) +
+  geom_histogram(alpha = 0.6, position = 'identity', binwidth = 0.05) +
+  scale_fill_manual(values = wes_palette('Darjeeling1')) +
+  theme_minimal()
+
+r.hist <- fit.lis.coef %>% 
+  ggplot(aes(x = r, fill = temperature)) +
+  geom_histogram(alpha = 0.6, position = 'identity', binwidth = 0.005) +
+  scale_fill_manual(values = wes_palette('Darjeeling1')) +
+  theme_minimal()
+
+beta.hist <- fit.lis.coef %>% 
+  ggplot(aes(x = beta, fill = temperature)) +
+  geom_histogram(alpha = 0.6, position = 'identity', binwidth = 0.05) +
+  scale_fill_manual(values = wes_palette('Darjeeling1')) +
+  theme_minimal()
+
+ggarrange(M0.hist, r.hist, beta.hist)
+```
+
+There are some plants with NA or outlier values.
+check how many, and if this causes problems for certain accessions, replicates, temepratures.
+Need for removal?
+
+```{r gather NAs + outliers}
+noFit.lis <- fit.lis.coef %>%
+  filter(is.na(M0) | is.na(r) | is.na(beta))
+
+table(noFit.lis$temperature, noFit.lis$replicate)
+
+r.outlier.lis <- fit.lis.coef %>%
+  filter(r > 2 | r < -2)
+
+beta.outlier.lis <- fit.lis.coef %>%
+  filter(beta < -2 | beta > 2)
+
+misfits.lis <- unique(c(noFit.lis$ID, r.outlier.lis$ID, beta.outlier.lis$ID))
+```
+
+```{r plot NAs and outliers - misfits}
+# plot data of NA and outlier IDs
+
+for (ID in misfits.lis){
+
+  ID.pred <- 0
+  if(!is.na(fit.lis.coef$M0[fit.lis.coef$ID == ID])){
+    ID.pred <- predict(fit.lis[[ID]])
+  }
+  
+  lemna.ID <- filter(lemna, ID == !!ID) %>%
+    arrange(DAS_decimal) %>%
+    mutate(modelFit = ID.pred)
+    
+  p <- ggplot(lemna.ID, aes(DAS_decimal, Area.2000px)) +
+    geom_point() +
+    geom_line(aes(DAS_decimal, modelFit), colour = wes_palette('Darjeeling1', n = 1)) +
+    ggtitle(ID) +
+    theme_minimal()
+  
+  pdf(paste('/scratch-cbe/users/pieter.clauw/16vs6/Results/Growth/nonlinear/perID/misfits/misfit.data_', ID, '.pdf', sep = ''))
+  print(p)
+  dev.off()
+  rm(lemna.ID)
+}
+```
+The selected misfits above have different reasons for showing outlier or NA fits.
+Among the NA fits we find IDs for which the data is clearly not following a power law.
+For some plants there is a visible logistic growth pattern, other have weird patterns (bad phenotyping).
+
+Among the plants with outlier fits, there are some which do look decent. Outlier criterium therefore must be relaxed.
+Others show assymptotic growth adn some extreme cases show fractionated growth patterns.
+
+Because there are priors about the dsitributions of M0, r and beta.
+We also tried a bayesian approach and see if this creates less outlier model fits.
+this however did not deliver results as expected (unrealsitic distribution of beta values), moreover, the estimated sampple size (ESS) was in many cases not satisfactory.
+Therefore we continue with the nlsList results
+
+
+Get the estimates per accession for each temperature
+correct for replicate effects and/or experiment effects
+especially M0 may have a stro,ng replicate effect (rep1 vs rep2&3)
+
+
+```{r significance of experiment effects}
+fit.lis.coef.NAfree <- na.omit(fit.lis.coef)
+M0.lm <- lm(M0 ~ acn * temperature + experiment, data = fit.lis.coef.NAfree)
+r.lm <- lm(r ~ acn * temperature + experiment, data = fit.lis.coef.NAfree)
+beta.lm <- lm(beta ~ acn * temperature + experiment, data = fit.lis.coef.NAfree)
+
+anova(M0.lm)
+anova(r.lm)
+anova(beta.lm)
+
+M0.lm <- lm(M0 ~ acn * temperature * experiment, data = fit.lis.coef.NAfree)
+r.lm <- lm(r ~ acn * temperature * experiment, data = fit.lis.coef.NAfree)
+beta.lm <- lm(beta ~ acn * temperature * experiment, data = fit.lis.coef.NAfree)
+
+anova(M0.lm)
+anova(r.lm)
+anova(beta.lm)
+
+```
+
+
+```{r get accession estimates}
+fit.lis.coef.NAfree <- na.omit(fit.lis.coef)
+
+# M0
+M0.lme <- lme(M0 ~ acn *temperature, random = ~1 |experiment, data = fit.lis.coef.NAfree)
+anova(M0.lme)
+M0.noTemp.lme <- lme(M0 ~ acn , random = ~1 |experiment/ID, data = fit.lis.coef.NAfree)
+
+M0.emm <- as_tibble(emmeans(M0.lme, ~ acn * temperature))
+M0.noTemp.emm <- as_tibble(emmeans(M0.noTemp.lme, ~ acn)) %>%
+  mutate(temperature = '16C') %>%
+  bind_rows(., mutate(., temperature = '6C')) %>%
+  select(acn, temperature, emmean, SE, df, lower.CL, upper.CL) %>%
+  mutate(temperature = as.factor(temperature))
+
+# r
+r.lme <- lme(r ~ acn * temperature, random = ~1 | experiment, data= fit.lis.coef.NAfree)
+anova(r.lme)
+
+r.emm <- as_tibble(emmeans(r.lme, ~ acn * temperature))
+
+# beta
+beta.lme <- lme(beta ~ acn * temperature, random = ~1 | experiment, data= fit.lis.coef.NAfree)
+anova(beta.lme)
+
+beta.emm <- as_tibble(emmeans(beta.lme, ~ acn * temperature))
+
+growth <- full_join(M0.emm, M0.noTemp.emm, by = c('acn', 'temperature'), suffix = c('.M0', '.M0.noTemp')) %>%
+  full_join(., r.emm, by = c('acn', 'temperature')) %>%
+  rename(r = emmean, SE.r = SE, df.r = df, lower.CL.r = lower.CL, upper.CL.r = upper.CL) %>%
+  full_join(., beta.emm, by = c('acn', 'temperature')) %>%
+  rename(accession = acn, M0 = emmean.M0, M0.noTemp = emmean.M0.noTemp, beta = emmean, SE.beta = SE, df.beta = df, lower.CL.beta = lower.CL, upper.CL.beta = upper.CL)
+
+write_csv(growth, path = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/growthParameters.csv')
+```
+
+```{r growth estimate distributions}
+M0.hist <- growth %>% 
+  ggplot(aes(x = M0, fill = temperature)) +
+  geom_histogram(alpha = 0.6, position = 'identity', binwidth = 0.025) +
+  scale_fill_manual(values = wes_palette('Darjeeling1')) +
+  theme_minimal()
+
+M0.noTemp.hist <- growth %>% 
+  ggplot(aes(x = M0.noTemp, fill = temperature)) +
+  geom_histogram(alpha = 0.6, position = 'identity', binwidth = 0.025) +
+  scale_fill_manual(values = wes_palette('Darjeeling1')) +
+  theme_minimal()
+
+r.hist <- growth %>% 
+  ggplot(aes(x = r, fill = temperature)) +
+  geom_histogram(alpha = 0.6, position = 'identity', binwidth = 0.0025) +
+  scale_fill_manual(values = wes_palette('Darjeeling1')) +
+  theme_minimal()
+
+beta.hist <- growth %>% 
+  ggplot(aes(x = beta, fill = temperature)) +
+  geom_histogram(alpha = 0.6, position = 'identity', binwidth = 0.025) +
+  scale_fill_manual(values = wes_palette('Darjeeling1')) +
+  theme_minimal()
+
+ggarrange(M0.hist, M0.noTemp.hist, r.hist, beta.hist)
+```
+
+
+Plot the model for each accession and each temperature against the data.
+(check ggplot for models)
+```{r}
+growth %>%
+pmap(function(...){
+  growth.par <- tibble(...)
+  acn <- growth.par$accession
+  temp <- growth.par$temperature
+  M0 <- growth.par$M0
+  M0.noTemp <- growth.par$M0.noTemp
+  r <- growth.par$r
+  beta <- growth.par$beta
+  lemna.a.t <- filter(lemna, acn == !!acn, temperature == !!temp)
+  pred.a.t <- tibble(DAS_decimal = seq(0.5, 21.5, length.out = 100)) %>%
+    mutate(Area.2000px.pred = (M0^(1-beta) + r*DAS_decimal*(1-beta))^(1/(1-beta)),
+           Area.2000px.M0.noTemp.pred = (M0.noTemp^(1-beta) + r*DAS_decimal*(1-beta))^(1/(1-beta)))
+  
+  p <- ggplot(aes(DAS_decimal, Area.2000px), data = lemna.a.t) +
+    geom_point(aes(col = replicate)) +
+    geom_line(aes(DAS_decimal, Area.2000px.pred), data = pred.a.t) +
+    scale_color_manual(values = wes_palette('Darjeeling1')) +
+    theme_minimal() +
+    labs(title = paste(acn, temp), x = 'days', y = 'rosette area')
+  
+  p.M0.noTemp <- ggplot(aes(DAS_decimal, Area.2000px), data = lemna.a.t) +
+    geom_point(aes(col = replicate)) +
+    geom_line(aes(DAS_decimal, Area.2000px.M0.noTemp.pred), data = pred.a.t) +
+    scale_color_manual(values = wes_palette('Darjeeling1')) +
+    theme_minimal() +
+    labs(title = paste(acn, temp), x = 'days', y = 'rosette area')
+  
+  pdf(paste('/scratch-cbe/users/pieter.clauw/16vs6/Results/Growth/nonlinear/perID/modelFits_acn_temp/fit_', acn, '_', temp, '.pdf', sep = ''))
+  print(p)
+  dev.off()
+  
+    pdf(paste('/scratch-cbe/users/pieter.clauw/16vs6/Results/Growth/nonlinear/perID/modelFits_acn_temp/fit_M0.noTemp_', acn, '_', temp, '.pdf', sep = ''))
+  print(p.M0.noTemp)
+  dev.off()
+})
+```
+
+
+```{r temperature responses}
+growth.temp <- growth %>%
+  pivot_wider()
+```
+
+
+
+
+Calculate heritabilities
+```{r}
+
+```
+
+
+
+
+
+
+
+## Try bayesian analysis with reasonably flexible priors
+Bayesian per individual plant analyses were run using nonlinear_bayesian_perID_cluster.sh
+```{r summarise bayesian results}
+fit.bayes.coef <- tibble(
+  ID = character(),
+  M0 = numeric(),
+  r = numeric(),
+  beta = numeric(),
+  M0_ESS = numeric(),
+  r_ESS = numeric(),
+  beta_ESS = numeric())
+missingAcns <- vector()
+for (acn in acns_rep123)
+{
+  file.acn <- paste('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/models/coef_perAcn_2.0/fit.bayesian_2.0.coef_', acn, '.csv', sep = '')
+  if (! file.exists(file.acn)){warning(paste('no summary file for accession:', acn)); missingAcns <- c(missingAcns, acn); next}
+  coef.acn <- read_csv(file.acn)
+  fit.bayes.coef <- bind_rows(fit.bayes.coef, coef.acn)
+}
+
+fit.bayes.coef <- fit.bayes.coef %>%
+  left_join(ID.meta, by = 'ID') %>%
+  dplyr::select(ID, acn, experiment, temperature, replicate, M0, r, beta, M0_ESS, r_ESS, beta_ESS)
+
+```
+
+```{r results bayesian}
+M0.hist <- fit.bayes.coef %>% 
+  ggplot(aes(x = M0, fill = temperature)) +
+  geom_histogram(alpha = 0.6, position = 'identity', binwidth = 0.05) +
+  scale_fill_manual(values = wes_palette('Darjeeling1')) +
+  theme_minimal()
+
+r.hist <- fit.bayes.coef %>% 
+  ggplot(aes(x = r, fill = temperature)) +
+  geom_histogram(alpha = 0.6, position = 'identity', binwidth = 0.005) +
+  scale_fill_manual(values = wes_palette('Darjeeling1')) +
+  theme_minimal()
+
+beta.hist <- fit.bayes.coef %>% 
+  ggplot(aes(x = beta, fill = temperature)) +
+  geom_histogram(alpha = 0.6, position = 'identity', binwidth = 0.005) +
+  scale_fill_manual(values = wes_palette('Darjeeling1')) +
+  theme_minimal()
+
+ggarrange(M0.hist, r.hist, beta.hist)
+```
+```{r ESS}
+M0_ESS.hist <- fit.bayes.coef %>% 
+  ggplot(aes(x = M0_ESS, fill = temperature)) +
+  geom_histogram(alpha = 0.6, position = 'identity') +
+  scale_fill_manual(values = wes_palette('Darjeeling1')) +
+  theme_minimal()
+
+r_ESS.hist <- fit.bayes.coef %>% 
+  ggplot(aes(x = r_ESS, fill = temperature)) +
+  geom_histogram(alpha = 0.6, position = 'identity') +
+  scale_fill_manual(values = wes_palette('Darjeeling1')) +
+  theme_minimal()
+
+beta_ESS.hist <- fit.bayes.coef %>% 
+  ggplot(aes(x = beta_ESS, fill = temperature)) +
+  geom_histogram(alpha = 0.6, position = 'identity') +
+  scale_fill_manual(values = wes_palette('Darjeeling1')) +
+  theme_minimal()
+
+ggarrange(M0_ESS.hist, r_ESS.hist, beta_ESS.hist)
+```
+```{r ESS correlations}
+M0_r_ESS <- fit.bayes.coef %>%
+  ggplot(aes(x = M0_ESS, y = r_ESS, color = temperature)) +
+  geom_point(alpha = 0.6) +
+  scale_color_manual(values = wes_palette('Darjeeling1')) +
+  theme_minimal()
+
+M0_beta_ESS <- fit.bayes.coef %>%
+  ggplot(aes(x = M0_ESS, y = beta_ESS, color = temperature)) +
+  geom_point(alpha = 0.6) +
+  scale_color_manual(values = wes_palette('Darjeeling1')) +
+  theme_minimal()
+
+r_beta_ESS <- fit.bayes.coef %>%
+  ggplot(aes(x = r_ESS, y = beta_ESS, color = temperature)) +
+  geom_point(alpha = 0.6) +
+  scale_color_manual(values = wes_palette('Darjeeling1')) +
+  theme_minimal()
+
+ggarrange(M0_r_ESS, M0_beta_ESS, r_beta_ESS)
+```
+```{r gather NAs + bad estimates}
+noFit.bayes <- fit.bayes.coef %>%
+  filter(is.na(M0) | is.na(r) | is.na(beta))
+
+table(noFit.bayes$temperature, noFit.bayes$replicate)
+
+
+r.outlier.bayes <- fit.bayes.coef %>%
+  filter(r > 2 | r < -2)
+
+beta.outlier.bayes <- fit.bayes.coef %>%
+  filter(beta < -2 | beta > 2)
+
+misfits.bayes <- unique(c(noFit.bayes$ID, r.outlier.bayes$ID, beta.outlier.bayes$ID))
+```
+
+```{r significance of experiment effects}
+fit.bayes.coef.NAfree <- na.omit(fit.bayes.coef)
+M0.lm <- lm(M0 ~ acn * temperature + experiment, data = fit.bayes.coef.NAfree)
+r.lm <- lm(r ~ acn * temperature + experiment, data = fit.bayes.coef.NAfree)
+beta.lm <- lm(beta ~ acn * temperature + experiment, data = fit.bayes.coef.NAfree)
+
+anova(M0.lm)
+anova(r.lm)
+anova(beta.lm)
+
+M0.glm <- glm(M0 ~ acn * temperature + experiment, data = fit.bayes.coef.NAfree, family = gaussian)
+r.lm <- lm(r ~ acn * temperature + experiment, data = fit.bayes.coef.NAfree)
+beta.lm <- lm(beta ~ acn * temperature + experiment, data = fit.bayes.coef.NAfree)
+
+
+M0.lm <- lm(M0 ~ acn * temperature * experiment, data = fit.bayes.coef.NAfree)
+r.lm <- lm(r ~ acn * temperature * experiment, data = fit.bayes.coef.NAfree)
+beta.lm <- lm(beta ~ acn * temperature * experiment, data = fit.bayes.coef.NAfree)
+
+anova(M0.lm)
+anova(r.lm)
+anova(beta.lm)
+```
+
+```{r temperature effects}
+fit.bayes.coef.NAfree <- na.omit(fit.bayes.coef)
+M0.lme <- lme(M0 ~ acn + temperature, random = ~1|experiment, data = fit.bayes.coef.NAfree)
+r.lme <- lme(r ~ acn + temperature, random = ~1|experiment, data = fit.bayes.coef.NAfree)
+beta.lme <- lme(beta ~ acn + temperature, random = ~1|experiment, data = fit.bayes.coef.NAfree)
+
+M0.aov <- anova(M0.lme)
+r.aov <- anova(r.lme)
+beta.aov <- anova(beta.lme)
+
+sign.levels <- c(-1, 0.001, 0.01, 0.05, 1)
+sign.labels <- c('<0.001', '< 0.01','<0.05','NS')
+
+tble.df <- tibble(terms = rownames(M0.aov), M0 = cut(M0.aov$`p-value`, sign.levels, sign.labels), r = cut(r.aov$`p-value`, sign.levels, sign.labels), beta = cut(beta.aov$`p-value`, sign.levels, sign.labels))
+  
+pdf('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/temperatureEffect_anova_2.0.pdf')
+grid.table(tble.df[, -1], rows = tble.df$terms)
+dev.off()
+```
+```{r accession x temperature effect}
+fit.bayes.coef.NAfree <- na.omit(fit.bayes.coef)
+M0.lme <- lme(M0 ~ acn * temperature, random = ~1|experiment, data = fit.bayes.coef.NAfree)
+r.lme <- lme(r ~ acn * temperature, random = ~1|experiment, data = fit.bayes.coef.NAfree)
+beta.lme <- lme(beta ~ acn * temperature, random = ~1|experiment, data = fit.bayes.coef.NAfree)
+
+M0.aov <- anova(M0.lme)
+r.aov <- anova(r.lme)
+beta.aov <- anova(beta.lme)
+
+sign.levels <- c(-1, 0.001, 0.01, 0.05, 1)
+sign.labels <- c('<0.001', '< 0.01','<0.05','NS')
+
+tble.df <- tibble(terms = rownames(M0.aov), M0 = cut(M0.aov$`p-value`, sign.levels, sign.labels), r = cut(r.aov$`p-value`, sign.levels, sign.labels), beta = cut(beta.aov$`p-value`, sign.levels, sign.labels))
+
+pdf('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/temperatureInteractionEffect_anova_2.0.pdf')
+grid.table(tble.df[, -1], rows = tble.df$terms)
+dev.off()
+
+```
+
+No temperature effects for M0 and beta.
+Only in interaction with accession.
+
+
+```{r estimates per acn}
+fit.bayes.coef.NAfree <- na.omit(fit.bayes.coef)
+
+# M0
+M0.lme <- lme(M0 ~ acn * temperature, random = ~1|experiment, data = fit.bayes.coef.NAfree)
+M0.noTemp.lme <- lme(M0 ~ acn , random = ~1|experiment, data = fit.bayes.coef.NAfree)
+
+M0.emm <- as_tibble(emmeans(M0.lme, ~ acn * temperature))
+
+M0.noTemp.emm <- as_tibble(emmeans(M0.noTemp.lme, ~ acn)) %>%
+  mutate(temperature = '16C') %>%
+  bind_rows(., mutate(., temperature = '6C')) %>%
+  select(acn, temperature, emmean, SE, df, lower.CL, upper.CL) %>%
+  mutate(temperature = as.factor(temperature))
+
+# r
+r.lme <- lme(r ~ acn * temperature, random = ~1|experiment, data= fit.bayes.coef.NAfree)
+
+r.emm <- as_tibble(emmeans(r.lme, ~ acn * temperature))
+
+# beta
+beta.lme <- lme(beta ~ acn * temperature, random = ~1|experiment, data= fit.bayes.coef.NAfree)
+beta.noTemp.lme <- lme(beta ~ acn , random = ~1|experiment, data = fit.bayes.coef.NAfree)
+
+beta.emm <- as_tibble(emmeans(beta.lme, ~ acn * temperature))
+beta.noTemp.emm <- as_tibble(emmeans(beta.noTemp.lme, ~ acn)) %>%
+  mutate(temperature = '16C') %>%
+  bind_rows(., mutate(., temperature = '6C')) %>%
+  select(acn, temperature, emmean, SE, df, lower.CL, upper.CL) %>%
+  mutate(temperature = as.factor(temperature))
+
+growth <- full_join(M0.emm, M0.noTemp.emm, by = c('acn', 'temperature'), suffix = c('.M0', '.M0.noTemp')) %>%
+  full_join(., r.emm, by = c('acn', 'temperature')) %>%
+  rename(r = emmean, SE.r = SE, df.r = df, lower.CL.r = lower.CL, upper.CL.r = upper.CL) %>%
+  full_join(., beta.emm, by = c('acn', 'temperature')) %>%
+  rename(beta = emmean, SE.beta = SE, df.beta = df, lower.CL.beta = lower.CL, upper.CL.beta = upper.CL) %>%
+  full_join(., beta.noTemp.emm, by = c('acn', 'temperature')) %>%
+  rename(accession = acn, M0 = emmean.M0, M0.noTemp = emmean.M0.noTemp, beta.noTemp = emmean, SE.beta.noTmep = SE, df.beta.noTemp = df, lower.CL.beta.noTemp = lower.CL, upper.CL.beta.noTemp = upper.CL)
+
+# add rosette area at final day.
+growth <- growth %>%
+  mutate(Area.DAS21 = (M0^(1-beta) + r*21*(1-beta))^(1/(1-beta)),
+         RGR.DAS21 = r*(M0^(1-beta) + r*21*(1-beta))^-1)
+
+write_csv(growth, path = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/growthParameters_bayesian_2.0.csv')
+```
+
+
+```{r growth estimate distributions}
+M0.hist <- growth %>% 
+  ggplot(aes(x = M0, fill = temperature)) +
+  geom_histogram(alpha = 0.6, position = 'identity', binwidth = 0.025) +
+  scale_fill_manual(values = wes_palette('Darjeeling1')) +
+  theme_minimal()
+
+M0.noTemp.hist <- growth %>% 
+  ggplot(aes(x = M0.noTemp, fill = temperature)) +
+  geom_histogram(alpha = 0.6, position = 'identity', binwidth = 0.025) +
+  scale_fill_manual(values = wes_palette('Darjeeling1')) +
+  theme_minimal()
+
+r.hist <- growth %>% 
+  ggplot(aes(x = r, fill = temperature)) +
+  geom_histogram(alpha = 0.6, position = 'identity', binwidth = 0.0025) +
+  scale_fill_manual(values = wes_palette('Darjeeling1')) +
+  theme_minimal()
+
+beta.hist <- growth %>% 
+  ggplot(aes(x = beta, fill = temperature)) +
+  geom_histogram(alpha = 0.6, position = 'identity', binwidth = 0.00025) +
+  scale_fill_manual(values = wes_palette('Darjeeling1')) +
+  theme_minimal()
+
+beta.noTemp.hist <- growth %>% 
+  ggplot(aes(x = beta.noTemp, fill = temperature)) +
+  geom_histogram(alpha = 0.6, position = 'identity', binwidth = 0.025) +
+  scale_fill_manual(values = wes_palette('Darjeeling1')) +
+  theme_minimal()
+
+ggarrange(M0.hist, M0.noTemp.hist, r.hist, beta.hist)
+pdf('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/growthParameters_M0_r_beta_2.0.pdf')
+ggarrange(M0.hist, r.hist, beta.hist)
+dev.off()
+```
+
+```{r plot estimated rosette areas per accession}
+growth %>%
+pmap(function(...){
+  growth.par <- tibble(...)
+  acn <- growth.par$accession
+  temp <- growth.par$temperature
+  M0 <- growth.par$M0
+  M0.noTemp <- growth.par$M0.noTemp
+  r <- growth.par$r
+  beta <- growth.par$beta
+  lemna.a.t <- filter(lemna, acn == !!acn, temperature == !!temp)
+  pred.a.t <- tibble(DAS_decimal = seq(0.5, 21.5, length.out = 100)) %>%
+    mutate(Area.2000px.pred = (M0^(1-beta) + r*DAS_decimal*(1-beta))^(1/(1-beta)),
+           Area.2000px.M0.noTemp.pred = (M0.noTemp^(1-beta) + r*DAS_decimal*(1-beta))^(1/(1-beta)))
+  
+  p <- ggplot(aes(DAS_decimal, Area.2000px), data = lemna.a.t) +
+    geom_point(aes(col = replicate)) +
+    geom_line(aes(DAS_decimal, Area.2000px.pred), data = pred.a.t) +
+    scale_color_manual(values = wes_palette('Darjeeling1')) +
+    theme_minimal() +
+    labs(title = paste(acn, temp), x = 'days', y = 'rosette area')
+  
+  p.M0.noTemp <- ggplot(aes(DAS_decimal, Area.2000px), data = lemna.a.t) +
+    geom_point(aes(col = replicate)) +
+    geom_line(aes(DAS_decimal, Area.2000px.M0.noTemp.pred), data = pred.a.t) +
+    scale_color_manual(values = wes_palette('Darjeeling1')) +
+    theme_minimal() +
+    labs(title = paste(acn, temp), x = 'days', y = 'rosette area')
+  
+  pdf(paste('/scratch-cbe/users/pieter.clauw/16vs6/Results/Growth/nonlinear/perID/modelFits_acn_temp/bayesian2.0/fit_', acn, '_', temp, '.pdf', sep = ''))
+  print(p)
+  dev.off()
+  
+    #pdf(paste('/scratch-cbe/users/pieter.clauw/16vs6/Results/Growth/nonlinear/perID/modelFits_acn_temp/fit_M0.noTemp_', acn, '_', temp, '.pdf', sep = ''))
+  #print(p.M0.noTemp)
+  #dev.off()
+})
+```
+
+```{r heritabilities}
+phenotypes <- c('M0', 'r', 'beta')
+growth.herit <- data.frame(phenotype = rep(phenotypes, length(temperatures)), temperature = rep(temperatures, each = length(phenotypes)), H = NA)
+
+for (temp in temperatures)
+{
+  for (pheno in c('M0', 'r', 'beta'))
+  {
+    fit.coef <- fit.bayes.coef %>%
+      select(acn, temperature, experiment, value = !!pheno) %>%
+      filter(temperature == temp, !is.na(value))
+    
+    lmm <- lme(value ~ 1, random = ~ 1|experiment/acn, data = fit.coef)
+    theta_lmm <- as.numeric(VarCorr(lmm)[4:5])
+    H <- theta_lmm[1] / (theta_lmm[1] + theta_lmm[2])
+    
+    growth.herit$H[growth.herit$phenotype == pheno & growth.herit$temperature == temp] <- H
+  }
+}
+
+
+
+
+herit.tble <- growth.herit %>%
+  mutate(H = round(H, digits = 2))
+
+pdf('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/broadSenseHeritabilities_2.0.pdf')
+grid.table(herit.tble[, -1], rows = herit.tble$phenotype)
+dev.off()
+```
+
+```{r growth phenotypes}
+growth.pheno <- growth %>%
+  select(accession, temperature, M0, M0.noTemp, r, beta, beta.noTemp, Area.DAS21, RGR.DAS21) %>%
+  pivot_wider(id_cols = accession, names_from = temperature, values_from = c('M0', 'M0.noTemp', 'r', 'beta', 'beta.noTemp', 'Area.DAS21', 'RGR.DAS21'), names_sep = '_')
+
+# response slopes
+resp.curve <- function(pheno_6C, pheno_16C)
+{
+  pheno <- tibble('X_6C' = pheno_6C, 'X_16C' = pheno_16C) %>%
+    pivot_longer(cols = starts_with('X'), names_to = 'temperature', names_prefix = 'X_', values_to = 'pheno') %>%
+    mutate(temperature = factor(temperature, levels = c('6C', '16C'), ordered = T))
+  fit <- lm(pheno ~ temperature, data = pheno)
+  resp <- as.numeric(fit$coefficients[2])
+  return(resp)
+}
+
+growth.pheno <- growth.pheno %>%
+  mutate(M0_response = unlist(map2(.x = M0_6C, .y = M0_16C, ~ resp.curve(.x, .y))),
+         r_response = unlist(map2(.x = r_6C, .y = r_16C, ~ resp.curve(.x, .y))),
+         beta_response = unlist(map2(.x = beta_6C, .y = beta_16C, ~ resp.curve(.x, .y))),
+         Area.DAS21_response = unlist(map2(.x = Area.DAS21_6C, .y = Area.DAS21_16C, ~ resp.curve(.x, .y))),
+         RGR.DAS21_response = unlist(map2(.x = RGR.DAS21_6C, .y = RGR.DAS21_16C, ~ resp.curve(.x, .y)))) %>%
+  mutate(M0.noTemp = M0.noTemp_16C, beta.noTemp = beta.noTemp_16C) %>%
+  select(-M0.noTemp_16C, -beta.noTemp_16C, -M0.noTemp_6C, -beta.noTemp_6C)
+
+write_csv(growth.pheno, path = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/nonlinear/growthPhenotypes_bayesian_2.0.csv')
+```
+
+
