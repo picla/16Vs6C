@@ -355,7 +355,7 @@ Calculate heritabilities
 
 
 ## Try bayesian analysis with reasonably flexible priors
-Bayesian per individual plant analyses were run using nonlinear_bayesian_perID_cluster.sh
+Bayesian per individual plant analyses were run using nonlinear_bayesian_perID_cluster2.0.sh
 ```{r summarise bayesian results}
 fit.bayes.coef <- tibble(
   ID = character(),
