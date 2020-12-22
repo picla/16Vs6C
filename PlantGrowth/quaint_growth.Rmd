@@ -1,0 +1,538 @@
+---
+title: "quaint_growth"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(tidyverse)
+library(viridis)
+library(quaint)
+library(rhdf5)
+library(kableExtra)
+library(ggpubr)
+knitr::opts_knit$set(root.dir = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/')
+```
+
+```{r data}
+K.h5 <- '/groups/nordborg/projects/nordborg_common/datasets/genotypes_for_pygwas/1.0.0/1001genomes/kinship_ibs_binary_mac5.h5py'
+SNPs.h5 <- '/groups/nordborg/user/pieter.clauw/Documents/Source/genotypes_for_pygwas/1.0.0/1001genomes_R_compatible/all_chromosomes_binary_gzip.hdf5'
+
+growth <- read_csv('Results/Growth/nonlinear/growthPhenotypes_bayesian_2.0.csv')
+
+meta <- read_csv('/groups/nordborg/user/pieter.clauw/Documents/Source/Accessions/A.thaliana_master_accession_list_011215.csv')
+acns.info <- read_csv('/groups/nordborg/user/pieter.clauw/Documents/Source/Accessions/1001genomes-accessions.csv')
+
+# worldclim data
+worldclim <- read_csv('/groups/nordborg/user/pieter.clauw/Documents/Source/Accessions/2029_modified_MN_SH_wc2.0_30s_bilinear.csv')
+```
+```{r prepare}
+acns.info <- mutate(acns.info, ecotype_id = as.character(ecotype_id))
+
+growth <- mutate(growth, accession = as.character(accession))
+
+worldclim <- mutate(worldclim, accession = as.character(accession))
+```
+
+
+```{r general variables}
+acns.pheno <- as.character(unique(growth$accession))
+
+admx.grp <- tibble(accession = acns.pheno) %>%
+  mutate(accession = as.character(accession)) %>%
+  left_join(., dplyr::select(acns.info, ecotype_id, group), by = c('accession' = 'ecotype_id')) %>%
+  mutate(accession = as.character(accession))
+
+phenotypes <- as.vector(outer(c('M0', 'r', 'beta'), c('6C', '16C', 'response'), paste, sep = '_'))
+```
+
+```{r genotypes}
+h5ls(SNPs.h5)
+
+# accession indices
+SNPs.acns <- h5read(SNPs.h5, 'accessions')
+SNPs.acns.pheno.id <- which(SNPs.acns %in% acns.pheno)
+
+# read in SNPs of phenotyped accessions
+SNPs <- h5read(SNPs.h5, 'snps', index = list(SNPs.acns.pheno.id, NULL))
+
+# MAF filter 5%
+maf.thrs <- 0.0
+mac.thrs <- maf.thrs * nrow(SNPs)
+SNPcnt <- colSums(SNPs)
+SNPmac <- unlist(lapply(SNPcnt, function(cnt){
+  min(c(cnt, nrow(SNPs) - cnt))}))
+
+SNPs <- SNPs[ ,which(SNPmac > mac.thrs)]
+```
+
+## Kinship
+
+# population structure of phenotyped accessions
+```{r read 1001 kinship matrix}
+# h5ls(K.h5)
+K <- h5read(K.h5, 'kinship')
+K.acns <- h5read(K.h5, 'accessions')
+```
+
+```{r prcomp K.1001 phenotyped accessions}
+K.acns.pheno.id <- which(K.acns %in% acns.pheno)
+K1001.pheno <- K[K.acns.pheno.id, K.acns.pheno.id]
+#rownames(K.pheno) <- K.acns[K.acns.pheno.id]
+heatmap(K.pheno)
+
+# cumulative variance of PCs
+pr.K1001.pheno <- prcomp(K1001.pheno, scale = TRUE)
+vars.pheno <- apply(pr.pheno$x, 2, var)  
+props.pheno <- vars.pheno / sum(vars.pheno)
+plot(cumsum(props.pheno))
+
+# percentage variance explained
+props.pheno.per <- round(props.pheno * 100, 2)
+props.pheno.per.lab <- paste(colnames(pr.pheno$x), " (", paste(props.pheno.per, '%', sep = ''), ")", sep = '')
+
+# PCA plot
+for (pc.nr in seq(1, 20, by = 2))
+{
+  PC.x <- paste('PC', pc.nr, sep = '')
+  PC.y <- paste('PC', pc.nr+1, sep = '')
+  PCA.plt <- as_tibble(pr.pheno$x) %>%
+    dplyr::select(!!PC.x, !!PC.y) %>%
+    mutate(accession = K.acns[K.acns.pheno.id]) %>%
+    left_join(., admx.grp, by = 'accession') %>%
+    ggplot(aes_string(x = PC.x, y = PC.y, color = 'group')) +
+    geom_point() +
+    xlab(props.pheno.per.lab[pc.nr]) +
+    ylab(props.pheno.per.lab[pc.nr + 1]) +
+    theme_minimal()
+  
+  print(PCA.plt)
+}
+```
+
+
+# compare to population structure of 1001 genomes
+```{r population structure 1001 genomes}
+#heatmap(K)
+
+# cumulative variance of PCs
+pr <- prcomp(K, scale = TRUE)
+vars <- apply(pr$x, 2, var)  
+props <- vars / sum(vars)
+plot(cumsum(props))
+
+# percentage variance explained
+props.per <- round(props * 100, 2)
+props.per.lab <- paste(colnames(pr$x), " (", paste(props.per, '%', sep = ''), ")", sep = '')
+
+# PCA plot
+for (pc.nr in seq(1, 20, by = 2))
+{
+  PC.x <- paste('PC', pc.nr, sep = '')
+  PC.y <- paste('PC', pc.nr+1, sep = '')
+  PCA.plt <- as_tibble(pr$x) %>%
+    dplyr::select(!!PC.x, !!PC.y) %>%
+    mutate(accession = K.acns) %>%
+    left_join(., acns.info, by = c('accession' = 'ecotype_id')) %>%
+    ggplot(aes_string(x = PC.x, y = PC.y, color = 'group')) +
+    geom_point() +
+    xlab(props.per.lab[pc.nr]) +
+    ylab(props.per.lab[pc.nr + 1]) +
+    theme_minimal()
+  
+  print(PCA.plt)
+}
+```
+
+## Polygenic adaptation in phenotyped accessions (Qpc)
+
+
+
+## difference between kinship matrices
+PCA gives different
+
+```{r PCA of SNP matrix}
+SNPs.pc <- prcomp(SNPs.maf)
+
+
+
+
+```
+
+
+
+```{r compare K matrices}
+# make sure order of accessions is the same
+K.pheno.row.names <- K.acns[K.acns.pheno.id]
+SNPs.pheno.row.names <- SNPs.acns[SNPs.acns.pheno.id]
+
+if (all(K.pheno.row.names == SNPs.pheno.row.names))
+{ print('accession order of kinship matrix and SNP matrix is equal')}
+
+# Emily's kinship, but with all 249 accessions
+scaleFactor <- sqrt(mean(colMeans(SNPs) * (1 - colMeans(SNPs))))
+myM <- dim(SNPs)[1]
+myT <- matrix(data = -1/myM, nrow = myM, ncol = myM)
+diag(myT) <- (myM)/myM
+myGstand <- (myT %*% SNPs)/scaleFactor
+myK <- cov(t(myGstand))
+
+# correlate both kinship matrices
+plot(K.pheno, myK)
+
+# histograms of both kinship matrices
+hist(myK, main = 'K Emily', breaks = 10000)
+hist(K1001.pheno, main = 'K 1001G phenotyped accessions', breaks = 10000)
+```
+
+```{r compare eigen decompositon K matrices}
+
+```
+
+
+```{r compare PCA K matrices}
+
+```
+
+
+```{r eigen decomposition K}
+eig.K.1001 <- eigen(K.pheno[-dim(K.pheno)[1], -dim(K.pheno)[2]])
+# calculate percentages
+percs <- eig.K.1001$values/sum(eig.K.1001$values) * 100
+# prepare as label axes
+percs.lab <- paste('PC', c(1:length(eig.K.1001$values)), " (", paste(round(percs, 2), '%', sep = ''), ")", sep = '')
+
+# cumulative percentages
+plot(cumsum(percs))
+plot(eig.K.1001$values/sum(eig.K.1001$values)*100, col = "#43B629", bty="n", ylab = "% variation explained by each PC", xlab = "PC")
+
+for (pc.nr in seq(1, 20, by = 2))
+{
+  PC.x <- paste('PC', pc.nr, sep = '')
+  PC.y <- paste('PC', pc.nr+1, sep = '')
+  PCA.plt <- as_tibble(eig.K.1001[['vectors']]) %>%
+    rename_with(., ~ gsub('V', 'PC', .x)) %>%
+    dplyr::select(!!PC.x, !!PC.y) %>%
+    mutate(accession = SNPs.acns[SNPs.acns.pheno.id][-length(SNPs.acns.pheno.id)]) %>%
+    left_join(., dplyr::select(acns.info, ecotype_id, group), by = c('accession' = 'ecotype_id')) %>%
+    ggplot(aes_string(x = PC.x, y = PC.y, color = 'group')) +
+    geom_point() +
+    xlab(percs.lab[pc.nr]) +
+    ylab(percs.lab[pc.nr + 1]) +
+    theme_minimal()
+  
+  print(PCA.plt)
+}
+
+```
+
+### Make a kinship matrix. 
+The input for this is a table of genotypes. You want to randomly sample loci -- I usually use 50,000 SNPs but you may want to use more or less for various reasons. It's a good idea to compare matrices for a couple different samples to make sure that sampling variance isn't causing a problem. You also want to have no missing data here -- I use a random imputation to replace missing data types.
+
+```{r kinship matrix Emily}
+## Make the k matrix using the make_k function.
+Kem.pheno <- make_k(as.matrix(SNPs))
+
+## we can look at myK a bit to see how we feel about it.
+pdf('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/Kem.pheno.pdf',width = 70, height = 70)
+heatmap(Kem.pheno, col=inferno(100))
+dev.off()
+```
+white line on heatmap in Rstudio is not present on high resolution heatmap pdf, artifact of Rstudio.
+
+```{r eigen decomposition K matrix Emily}
+# eigen decomposition
+eig.Kem.pheno <- eigen(Kem.pheno)
+
+# calculate percentages
+percs <- eig.Kem.pheno$values^2/sum(eig.Kem.pheno$values^2) * 100
+# prepare as label axes
+eig.Kem.pheno.percs.lab <- paste('PC', c(1:length(eig.Kem.pheno$values)), " (", paste(round(percs, 2), '%', sep = ''), ")", sep = '')
+
+# cumulative percentages
+plot(cumsum(percs))
+plot(eig.Kem.pheno$values/sum(eig.Kem.pheno$values)*100, col = "#43B629", bty="n", ylab = "% variation explained by each PC", xlab = "PC")
+
+for (pc.nr in seq(1, 20, by = 2))
+{
+  PC.x <- paste('PC', pc.nr, sep = '')
+  PC.y <- paste('PC', pc.nr+1, sep = '')
+  PCA.plt <- as_tibble(eig.Kem.pheno[['vectors']]) %>%
+    rename_with(., ~ gsub('V', 'PC', .x)) %>%
+    dplyr::select(!!PC.x, !!PC.y) %>%
+    mutate(accession = SNPs.acns[SNPs.acns.pheno.id][c(1:dim(Kem.pheno)[1])]) %>%
+    left_join(., dplyr::select(acns.info, ecotype_id, group), by = c('accession' = 'ecotype_id')) %>%
+    ggplot(aes_string(x = PC.x, y = PC.y, color = 'group')) +
+    geom_point() +
+    xlab(eig.Kem.pheno.percs.lab[pc.nr]) +
+    ylab(eig.Kem.pheno.percs.lab[pc.nr + 1]) +
+    theme_minimal()
+  
+  print(PCA.plt)
+}
+```
+
+```{r PCA Kinship matrix Emily}
+# eigen decomposition
+pc.Kem.pheno <- prcomp(Kem.pheno)
+
+# calculate percentages
+percs <- pc.Kem.pheno$sdev^2/sum(pc.Kem.pheno$sdev^2) * 100
+# prepare as label axes
+percs.lab <- paste('PC', c(1:length(pc.Kem.pheno$sdev^2)), " (", paste(round(percs, 2), '%', sep = ''), ")", sep = '')
+
+# cumulative percentages
+plot(cumsum(percs))
+plot(pc.Kem.pheno$sdev/sum(pc.Kem.pheno$sdev)*100, col = "#43B629", bty="n", ylab = "% variation explained by each PC", xlab = "PC")
+
+for (pc.nr in seq(1, 20, by = 2))
+{
+  PC.x <- paste('PC', pc.nr, sep = '')
+  PC.y <- paste('PC', pc.nr+1, sep = '')
+  PCA.plt <- as_tibble(pc.Kem.pheno[['rotation']]) %>%
+    rename_with(., ~ gsub('V', 'PC', .x)) %>%
+    dplyr::select(!!PC.x, !!PC.y) %>%
+    mutate(accession = SNPs.acns[SNPs.acns.pheno.id][c(1:dim(Kem.pheno)[1])]) %>%
+    left_join(., dplyr::select(acns.info, ecotype_id, group), by = c('accession' = 'ecotype_id')) %>%
+    ggplot(aes_string(x = PC.x, y = PC.y, color = 'group')) +
+    geom_point() +
+    xlab(percs.lab[pc.nr]) +
+    ylab(percs.lab[pc.nr + 1]) +
+    theme_minimal()
+  
+  print(PCA.plt)
+}
+```
+
+
+
+### run Qpc
+```{r order growth data}
+growth <- growth[match(SNPs.pheno.row.names, growth$accession), ]
+```
+
+
+In the function:
+* myZ is a vector of trait values
+* myU is the eigen vectors of the kinship matrix
+* myLambdas is the eigen values of the kinship matrix
+* myL is the range of PCs used to estimate Va
+* myM is the range of PCs used to test for selection
+```{r qpc based on eigen decomposition of kinship matrix of Emily}
+Qpc.eig.Kem <- calcQpc(myZ = growth$r_response,
+                myU = eig.Kem.pheno$vectors, 
+                myLambdas = eig.Kem.pheno$values,
+                myM = 1:10,
+                myL = 11:248)
+
+Qpc.eig.Kem$pvals %>%
+  as_tibble() %>%
+  rename(pvalue = value) %>%
+  mutate(PC = as.factor(c(1:length(pvalue)))) %>%
+  ggplot(aes(x = PC, y = -log10(pvalue))) +
+  geom_point() +
+  geom_hline(yintercept = c(-log10(0.05), -log10(0.1)), color = 'red', linetype = c(1,2)) +
+  theme_minimal()
+```
+
+```{r plot PC vs phenotype}
+PC.nr <- 1
+pheno.name <- 'r_response'
+
+Va.est <- var0(Qpc.eig.Kem$cml) 
+CI.est <- 1.645 * sqrt(Va.est * eig.Kem.pheno$values)
+#TODO: check whicb % CI these are. 95% probably? we may want to lower this to 90%
+# 1.96 is 95%; 90% is 1.645
+# why multiplying by 1.96 twice? When CI.est is calculated and when slope is defined
+# result makes more sense when multiplication is done only once.
+
+growth %>%
+  slice_head(n = dim(Kem.pheno)[1]) %>%
+  select(accession, !!pheno.name) %>%
+  rename(pheno = !!pheno.name) %>%
+  mutate(PC = eig.Kem.pheno$vectors[, PC.nr],
+         ymin = mean(pheno) - (1 * PC * CI.est[PC.nr]),
+         ymax = mean(pheno) + (1 * PC * CI.est[PC.nr])) %>%
+  left_join(., admx.grp, by = 'accession') %>%
+  ggplot(aes(x = PC, y = pheno)) +
+  geom_point(aes(color = group)) +
+  geom_smooth(method = 'lm', se = F) +
+  geom_ribbon(aes(ymin=ymin, ymax=ymax, x=PC, fill = 'neutral'), fill = 'grey', alpha = 0.3) +
+  labs(x = eig.Kem.pheno.percs.lab[PC.nr], y = pheno.name) +
+  theme_minimal()
+```
+
+```{r Qpc all phenotypes}
+Qpc.allPheno <- lapply(phenotypes, function(pheno.name)
+{
+  # calculate Qpc and test for selection
+  Qpc.pheno <- calcQpc(myZ = pull(growth, !!pheno.name),
+                myU = eig.Kem.pheno$vectors, 
+                myLambdas = eig.Kem.pheno$values,
+                myM = 1:10,
+                myL = 11:248)
+  return(Qpc.pheno)
+})
+names(Qpc.allPheno) <- phenotypes
+```
+```{r plot significance all Qpc analyses}
+lapply(phenotypes, function(pheno.name)
+{
+  Qpc.pheno <- Qpc.allPheno[[pheno.name]]
+  # plot significance for each PC
+  pval.plt <- Qpc.pheno$pvals %>%
+    as_tibble() %>%
+    rename(pvalue = value) %>%
+    mutate(PC = as.factor(c(1:length(pvalue)))) %>%
+    ggplot(aes(x = PC, y = -log10(pvalue))) +
+      geom_point() +
+      geom_hline(yintercept = c(-log10(0.05), -log10(0.1)), color = 'red', linetype = c(1,2)) +
+      labs(title = pheno.name) +
+      theme_minimal()
+  print(pval.plt)
+})
+```
+```{r plot PC-phenotype correlations for significant Qpc}
+lapply(phenotypes, function(pheno.name)
+{
+  Qpc.pheno <- Qpc.allPheno[[pheno.name]]
+  # plot PC - phenotype correlation for each significant PC
+  PC.sign <- which(Qpc.pheno$pvals < 0.1)
+  
+  for (PC.nr in PC.sign)
+  {
+      myZ = pull(growth, !!pheno.name)[1:nrow(Kem.pheno)]
+      myZ = myZ - mean(myZ)
+      myBm = myZ %*% eig.Kem.pheno$vectors
+      myCm = myBm/sqrt(eig.Kem.pheno$values)
+      myVa = var0(myCm[11:248])
+      myCI = sqrt(myVa*eig.Kem.pheno$values)
+  
+    PC.pheno.plt.tbl  <- growth %>%
+      slice_head(n = dim(Kem.pheno)[1]) %>%
+      select(accession, !!pheno.name) %>%
+      rename(pheno = !!pheno.name) %>%
+      mutate(
+             PC = eig.Kem.pheno$vectors[, PC.nr],
+             ymin = mean(pheno) - (1.96 * PC * myCI[PC.nr]),
+             ymax = mean(pheno) + (1.96 * PC * myCI[PC.nr])) %>%
+      left_join(., admx.grp, by = 'accession') %>%
+      left_join(., worldclim[, c('accession', 'bio_11')], by = 'accession')
+    
+    PC.pheno.plt.admx <- ggplot(PC.pheno.plt.tbl, aes(x = PC, y = pheno)) +
+      geom_point(aes(color = group)) +
+      geom_smooth(method = 'lm', se = F) +
+      geom_ribbon(aes(ymin=ymin, ymax=ymax, x=PC, fill = 'neutral'), fill = 'grey', alpha = 0.3) +
+      labs(x = eig.Kem.pheno.percs.lab[PC.nr], y = pheno.name) +
+      theme_minimal()
+    print(PC.pheno.plt.admx)
+    
+    # plot with climate variable colouring
+    PC.pheno.plt.clim <- ggplot(PC.pheno.plt.tbl, aes(x = PC, y = pheno)) +
+        geom_point(aes(color = bio_11)) +
+        geom_smooth(method = 'lm', se = F) +
+        geom_ribbon(aes(ymin=ymin, ymax=ymax, x=PC, fill = 'neutral'), fill = 'grey', alpha = 0.3) +
+        labs(x = eig.Kem.pheno.percs.lab[PC.nr], y = pheno.name) +
+        theme_minimal()
+    print(PC.pheno.plt.clim)
+  }
+})
+
+
+```
+
+```{r table of significance Qpc}
+Qpc.pvals.lst <- lapply(Qpc.allPheno, function(Qpc){return(Qpc$pvals)})
+do.call(Qpc.pvals.lst, rbind)
+#pval.summary <- tibble(phenotype = character(), pVal_5 = character(), pVal_10 = character(), pAdj_5 = character(), pAdj_10 = character())
+
+pval.summary <- lapply(Qpc.allPheno, function(Qpc){
+  pvals <- Qpc$pvals
+  padj <- p.adjust(pvals, method = 'fdr')
+  
+  PCnr.pval.5 <- which(pvals < 0.05)
+  PCnr.pval.10 <- which(pvals < 0.1 & pvals >= 0.05)
+  PCnr.padj.5 <- which(padj < 0.05)
+  PCnr.padj.10 <- which(padj < 0.1 & padj >= 0.05)
+  
+  PC.pval.5 <- paste(paste('PC', PCnr.pval.5, ' (', round(pvals[PCnr.pval.5], 4), ')', sep = ''), sep = '; ')
+  PC.pval.10 <- paste(paste('PC', PCnr.pval.10, ' (', round(pvals[PCnr.pval.10], 4), ')', sep = ''), sep = '; ')
+  PC.padj.5 <- paste(paste('PC', PCnr.padj.5, ' (', round(padj[PCnr.padj.5], 4), ')', sep = ''), sep = '; ')
+  PC.padj.10 <- paste(paste('PC', PCnr.padj.10, ' (', round(padj[PCnr.padj.10], 4), ')', sep = ''), sep = '; ')
+
+  return(tibble(pVal_5 = PC.pval.5, pVal_10 = PC.pval.10, pAdj_5 = PC.padj.5, pAdj_10 = PC.padj.10))
+})
+
+pval.tbl <- do.call(rbind, pval.summary) %>%
+  mutate(phenotype = phenotypes) %>%
+  select(phenotype, everything()) %>%
+  mutate_if(is.character,str_replace_all, pattern = fixed("PC ()"), replacement = "/")
+
+# TODO: crete table for paper
+  kable(pval.tbl, col.names = c('phenotype',  '< 0.05', '< 0.10', '< 0.05', '< 0.10'),
+        booktabs = T,
+        "html") %>%
+  add_header_above(c(' ', 'p-value' = 2, 'p-value (fdr)' = 2)) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F) %>%
+  save_kable(x = ., file = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/polygenic/quaint_pheno_PC_pvals.pdf')
+
+```
+
+```{r plot r_response vs PC1 and PC5 in combined figure, message = F}
+Qpc.pheno <- Qpc.allPheno[['r_response']]
+
+myZ = pull(growth, r_response)[1:nrow(Kem.pheno)]
+myZ = myZ - mean(myZ)
+myBm = myZ %*% eig.Kem.pheno$vectors
+myCm = myBm/sqrt(eig.Kem.pheno$values)
+myVa = var0(myCm[11:248])
+myCI = sqrt(myVa*eig.Kem.pheno$values)
+  
+PC.pheno.plt.tbl  <- growth %>%
+  slice_head(n = dim(Kem.pheno)[1]) %>%
+  select(accession, r_response) %>%
+  mutate(
+    PC1 = eig.Kem.pheno$vectors[, 1],
+    ymin1 = mean(r_response) - (1.645 * PC1 * myCI[1]),
+    ymax1 = mean(r_response) + (1.645 * PC1 * myCI[1]),
+    PC5 = eig.Kem.pheno$vectors[, 5],
+    ymin5 = mean(r_response) - (1.645 * PC5 * myCI[5]),
+    ymax5 = mean(r_response) + (1.645 * PC5 * myCI[5]),) %>%
+  left_join(., admx.grp, by = 'accession')
+
+PC1.plt <- ggplot(PC.pheno.plt.tbl, aes(x = PC1, y = r_response)) +
+      geom_point(aes(color = group)) +
+      geom_smooth(method = 'lm', se = F) +
+      geom_ribbon(aes(ymin=ymin1, ymax=ymax1, x=PC1, fill = 'neutral'), fill = 'grey', alpha = 0.3) +
+      labs(x = eig.Kem.pheno.percs.lab[1], y = 'r_response') +
+      theme_minimal() +
+      theme(legend.title = element_blank(),
+            text = element_text(size = 15))
+
+PC5.plt <- ggplot(PC.pheno.plt.tbl, aes(x = PC5, y = r_response)) +
+      geom_point(aes(color = group)) +
+      geom_smooth(method = 'lm', se = F) +
+      geom_ribbon(aes(ymin=ymin5, ymax=ymax5, x=PC5, fill = 'neutral'), fill = 'grey', alpha = 0.3) +
+      labs(x = eig.Kem.pheno.percs.lab[5], y = 'r_response') +
+      theme_minimal() +
+      theme(legend.title = element_blank(),
+            text = element_text(size = 15)) 
+
+pdf('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/polygenic/r_response_PC1_PC5.pdf', width = 14, onefile = F)
+ggarrange(PC1.plt, PC5.plt, common.legend = T, legend = 'bottom', labels = c('A', 'B'))
+dev.off()
+  
+  
+```
+
+
+
+
+
+## GWAS
+get this running in GEMMA
+
+## Polygenic scores
+
+## conditional Qpc
