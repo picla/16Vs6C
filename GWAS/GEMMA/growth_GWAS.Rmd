@@ -1,0 +1,240 @@
+---
+title: "growth_GWAS"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(tidyverse)
+library(ggpubr)
+library(wesanderson)
+options(bitmapType="cairo")
+```
+
+```{r data}
+#gwas.center = read_delim('/scratch-cbe/users/pieter.clauw/gemma/output/gwas.test.pheno1.assoc.txt', delim = '\t')
+#gwas.stand = read_delim('/scratch-cbe/users/pieter.clauw/gemma/output/gwas.test2.pheno1.assoc.txt', delim = '\t')
+
+gwas.files <- list.files(path = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Growth/GWAS/singleTrait/growthParameters.gemma.lmm', pattern = '*.assoc.txt', full.names = T)
+#gwas.results <- lapply(gwas.files, read_delim, delim = '\t')
+```
+
+
+
+```{r functions}
+# QQ-plots for GWAS p-values
+plot.qq <- function(gwas.pval, ci = 0.95){
+  # get number of tests
+  nTests = length(gwas.pval)
+  qq.dat <- tibble(
+    observed = -log10(sort(gwas.pval)),
+    expected = -log10(ppoints(nTests)),
+    cLower = -log10(qbeta(p = (1 - ci) / 2, shape1 = seq(nTests), shape2 = rev(seq(nTests)))),
+    cUpper = -log10(qbeta(p = (1 + ci) / 2, shape1 = seq(nTests), shape2 = rev(seq(nTests)))))
+  # make QQ-plot
+  qq.plt <- ggplot(qq.dat, aes(x = expected, y = observed)) +
+    geom_ribbon(aes(ymax = cUpper, ymin = cLower), fill = "grey30", alpha = 0.5) +
+    geom_step(color = wes_palettes['Darjeeling1'][[1]][1], size = 1.1, direction = "vh") +
+    geom_segment(data = . %>% filter(expected == max(expected)),
+                 aes(x = 0, xend = expected, y = 0, yend = expected),
+                 size = 1.25, alpha = 0.5, color = "grey30", lineend = "round") +
+    labs(x = expression(paste("Expected -log"[10],"(", plain(P),")")),
+         y = expression(paste("Observed -log"[10],"(", plain(P),")"))) +
+    theme_minimal()
+  
+  return(qq.plt)
+}
+
+# get aboslute position of SNPs on the genome.
+# for plotting manhattan plots
+SNP_absolutePosition = function(chr, pos, chromEnds, gap = 1000000){
+  chromEnds.cum <- c(0, cumsum(chromEnds))
+  absPos <- pos + chromEnds.cum[chr] + (chr - 1) * gap
+  return(absPos)
+}
+
+# createa manhattan plot of GWAS results
+plot.manhattan <- function(gwas.chr, gwas.pos, gwas.pval, gwas.af, maf = 0.05){
+  # combine data in tibble
+  gwas.dat <- tibble(chr = gwas.chr, pos = gwas.pos, pval = gwas.pval, af = gwas.af)
+  # define chromosome lengths
+  chrLengths <- gwas.dat %>%
+    group_by(chr) %>%
+    summarise(maxPos = max(pos), .groups = 'drop')
+  # get absolute SNP positions for plotting
+  gwas.dat$absPos <- pmap_dbl(list(chr = gwas.dat$chr, pos = gwas.dat$pos), SNP_absolutePosition, chromEnds = chrLengths$maxPos)
+  # get chromosome center positions fror x-axis marks
+  axis.dat <- gwas.dat %>%
+    group_by(chr) %>%
+    summarise(centerPos = (max(absPos) + min(absPos))/2, .groups = 'drop')
+  # get significance threshold
+  sig.bonf <- 0.05/length(gwas.pval)
+  # plot
+  manh.plt <- gwas.dat %>%
+    filter(af >= maf) %>%
+    ggplot(aes(x = absPos, y = -log10(pval), color = as.factor(chr))) +
+      geom_point(alpha = 1, size = 0.5) +
+      geom_hline(yintercept = -log10(sig.bonf), color = wes_palettes['Darjeeling1'][[1]][1], linetype = "dashed") + 
+      scale_color_manual(values = rep(c(wes_palettes['Darjeeling1'][[1]][5], '#2a8faa'), max(gwas.dat$chr))) +
+      scale_x_continuous(label = axis.dat$chr, breaks = axis.dat$centerPos) +
+      labs(x = NULL,
+           y = '-log10(p)') +
+      theme_minimal() +
+      theme(
+        legend.position = 'none',
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank())
+  return(manh.plt)
+}
+
+
+```
+
+```{r plot results}
+lapply(gwas.files, function(gwas.file){
+  phenotype <- gsub('.{10}$', '', strsplit(gwas.file, '/')[[1]][14])
+  gwas.result <- read_delim(gwas.file, delim = '\t')
+  
+  # QQ-plot
+  pdf(paste(gsub('.{4}$', '', gwas.file), 'qqplot.pdf', sep = '.'))
+  print(plot.qq(gwas.result$p_lrt))
+  dev.off()
+  
+  # manhattan plot
+  png(paste(gsub('.{4}$', '', gwas.file), 'manhattanPlot.png', sep = '.'), width = 960)
+  print(plot.manhattan(gwas.result$chr, gwas.result$ps, gwas.result$p_lrt, gwas.result$af))
+  dev.off()
+})
+```
+
+
+```{r reformat for uploading in GWAS browser}
+nAcns <- 249
+lapply(gwas.files, function(gwas.file){
+  gwas.result <- read_delim(gwas.file, delim = '\t') %>%
+    mutate(mac = af * nAcns) %>%
+    dplyr::select(chr, ps, p_lrt, af, mac, beta) %>%
+    rename(pos = ps, pvalue = p_lrt, maf = af, GVE = beta) %>%
+    write.csv(., paste(gsub('.{4}$', '', gwas.file), 'browser.csv', sep = '.'))
+})
+```
+
+
+
+
+```{r MAF}
+gwas.center.maf <- filter(gwas.center, af <= 0.05)
+gwas.stand.maf <- filter(gwas.stand, af <= 0.05)
+```
+
+```{r QQplot}
+# taken from https://danielroelfs.com/blog/how-i-make-qq-plots-using-ggplot/
+ci = 0.95
+
+qq.data.center <- tibble(
+  observed = -log10(sort(gwas.center.maf$p_lrt)),
+  expected = -log10(ppoints(nrow(gwas.center.maf))),
+  clower   = -log10(qbeta(p = (1 - ci) / 2, shape1 = seq(nrow(gwas.center.maf)), shape2 = rev(seq(nrow(gwas.center.maf))))),
+  cupper   = -log10(qbeta(p = (1 + ci) / 2, shape1 = seq(nrow(gwas.center.maf)), shape2 = rev(seq(nrow(gwas.center.maf)))))
+)
+
+qq.c <- ggplot(qq.data.center, aes(x = expected, y = observed)) +
+  geom_ribbon(aes(ymax = cupper, ymin = clower), fill = "grey30", alpha = 0.5) +
+  geom_step(color = 'red', size = 1.1, direction = "vh") +
+  geom_segment(data = . %>% filter(expected == max(expected)), 
+               aes(x = 0, xend = expected, y = 0, yend = expected),
+               size = 1.25, alpha = 0.5, color = "grey30", lineend = "round") +
+  labs(x = expression(paste("Expected -log"[10],"(", plain(P),")")),
+       y = expression(paste("Observed -log"[10],"(", plain(P),")"))) +
+  theme()
+
+qq.data.stand <- tibble(
+  observed = -log10(sort(gwas.stand.maf$p_lrt)),
+  expected = -log10(ppoints(nrow(gwas.stand.maf))),
+  clower   = -log10(qbeta(p = (1 - ci) / 2, shape1 = seq(nrow(gwas.stand.maf)), shape2 = rev(seq(nrow(gwas.stand.maf))))),
+  cupper   = -log10(qbeta(p = (1 + ci) / 2, shape1 = seq(nrow(gwas.stand.maf)), shape2 = rev(seq(nrow(gwas.stand.maf)))))
+)
+  
+qq.s <- ggplot(qq.data.stand, aes(x = expected, y = observed)) +
+  geom_ribbon(aes(ymax = cupper, ymin = clower), fill = "grey30", alpha = 0.5) +
+  geom_step(color = 'red', size = 1.1, direction = "vh") +
+  geom_segment(data = . %>% filter(expected == max(expected)), 
+               aes(x = 0, xend = expected, y = 0, yend = expected),
+               size = 1.25, alpha = 0.5, color = "grey30", lineend = "round") +
+  labs(x = expression(paste("Expected -log"[10],"(", plain(P),")")),
+       y = expression(paste("Observed -log"[10],"(", plain(P),")"))) +
+  theme()
+```
+
+
+
+
+
+```{r manhattan plot}
+chrLengths <- gwas.center %>%
+  group_by(chr) %>%
+  summarise(maxPos = max(ps))
+
+SNP_absolutePosition = function(chr, pos, gap = 1000000, chromEnds = chrLengths$maxPos){
+  chromEnds.cum <- c(0, cumsum(chromEnds))
+  absPos <- pos + chromEnds.cum[chr] + (chr - 1) * gap
+  return(absPos)
+}
+
+gwas.center$absPos <- pmap_dbl(list(chr = gwas.center$chr, pos = gwas.center$ps), SNP_absolutePosition)
+
+axis.dat <- gwas.center %>%
+  group_by(chr) %>%
+  summarise(centerPos = (max(absPos) + min(absPos))/2)
+
+sig.bonf <- 0.05/nrow(gwas.center)
+
+manh.c <- gwas.center %>%
+  filter(af > 0.05, p_lrt < 0.2) %>%
+  ggplot(aes(x = absPos, y = -log10(p_lrt), color = as.factor(chr))) +
+  geom_point(alpha = 0.75, size = 0.5) +
+  geom_hline(yintercept = -log10(sig.bonf), color = wes_palettes['Darjeeling1'][[1]][1], linetype = "dashed") + 
+  scale_color_manual(values = rep(c(wes_palettes['Darjeeling1'][[1]][5], '#2a8faa'), max(gwas.center$chr))) +
+  scale_x_continuous(label = axis.dat$chr, breaks = axis.dat$centerPos) +
+  labs(x = NULL,
+       y = '-log10(p)') +
+  theme_minimal() +
+  theme(
+    legend.position = 'none',
+        panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank())
+
+
+
+manhplot <- ggplot(gwas.dat, aes(x = BPcum, y = -log10(P), 
+                                 color = as.factor(CHR), size = -log10(P))) +
+  geom_point(alpha = 0.75) +
+  geom_hline(yintercept = -log10(sig), color = "grey40", linetype = "dashed") + 
+  scale_x_continuous(label = axis.set$CHR, breaks = axis.set$center) +
+  scale_y_continuous(expand = c(0,0), limits = c(0, ylim)) +
+  scale_color_manual(values = rep(c("#276FBF", "#183059"), nCHR)) +
+  scale_size_continuous(range = c(0.5,3)) +
+  labs(x = NULL, 
+       y = "-log10(p)") + 
+  theme_minimal() +
+  theme( 
+    legend.position = "none",
+    panel.border = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.text.x = element_text(angle = 90, size = 8, vjust = 0.5)
+  )
+
+
+manh.c
+```
+
+```{r manhattan plot}
+plot.manhattan(gwas.chr = gwas.center$chr, gwas.pos = gwas.center$ps, gwas.pval = gwas.center$p_lrt, gwas.af = gwas.center$af, maf = 0.05)
+
+```
+
+
+
+
