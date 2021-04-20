@@ -1,0 +1,467 @@
+---
+title: "GxE_expression"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(tidyverse)
+library(ggpubr)
+library(tximport)
+library(DESeq2)
+library(vsn)
+library(ggdendro)
+library(wesanderson)
+library(cowplot)
+library(topGO)
+library(viridis)
+source('diffExpr_functions.r')
+source('../../coExpression/Scripts/Rfunctions.r')
+knitr::opts_knit$set(root.dir = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/')
+```
+
+
+Analyse GxE genes specifically.
+Understand their expression patterns and their functional enrichment.
+
+```{r data}
+# RNA-seq samples
+samples <- read_delim('/groups/nordborg/projects/cegs/16Vs6C/Data/Transcriptome/RawData/samples.txt', delim = '\t')
+# worldclim data
+worldclim <- read_csv('/groups/nordborg/user/pieter.clauw/Documents/Source/Accessions/2029_modified_MN_SH_wc2.0_30s_bilinear.csv')
+
+# expression data
+#TODO: cleanup the parallel araport11 data
+Araport11 <- read.table('/groups/nordborg/user/pieter.clauw/Documents/Source/Araport11/Araport11_GFF3_genes_transposons.201606.ChrM_ChrC_FullName.gtf', sep = '\t')
+
+# gene categories Sonia
+gene_cat <- read_delim('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Transcriptome/diffExpr_Sonia/Category_genes.txt', delim = '\t')
+```
+
+```{r prepare}
+# filter only sequenced samples
+samples <- filter(samples, Selected == 'yes') %>%
+  mutate(temperature = as.factor(temperature),
+         replicate = as.factor(replicate),
+         experiment = as.factor(paste(temperature, replicate, sep = '_')),
+         ID = paste(tray, tray_coordinate, temperature, replicate, sep = '_'),
+         sampleName = paste(accession, temperature, replicate, sep = '_')) %>%
+  left_join(., worldclim[, c('accession', 'bio_11')], by = 'accession') %>%
+  mutate(accession = as.factor(accession))
+
+# worldclim
+worldclim <- mutate(worldclim, accession = as.factor(accession))
+
+# GxE genes
+GxE.genes <- filter(gene_cat, category == 'GxT') %>% pull(genes)
+
+# Araport11 GTF
+colnames(Araport11) <- c('chr', 'source', 'feature', 'start', 'end', 'score', 'strand', 'frame', 'attributes')
+Araport11$attributes <- as.character(Araport11$attributes)
+Araport11[,9:10] <- str_split_fixed(Araport11$attributes, ';', 3)[,1:2]
+Araport11$V10 <- sub(".*id ", "", Araport11$V10)
+```
+
+```{r functions}
+# heatmap data matrix
+heatmap.matrix <- function(data.tbl, rows, columns, values)
+{
+  data.tbl.wide <- data.tbl %>%
+    dplyr::select(!!rows, !!columns, !!values) %>%
+  pivot_wider(names_from = !!columns, values_from = !!values)
+  data.tbl.mtrx <- as.matrix(data.tbl.wide[, -1])
+  rownames(data.tbl.mtrx) <- data.tbl.wide[[rows]]
+  return(data.tbl.mtrx)
+}
+
+# row dendrograms
+heatmap.dendro.row <- function(heatmap.mtrx, k, dist.method = 'euclidean', clust.method = 'ward.D2')
+{
+  clust.row <- hclust(dist(heatmap.mtrx, method = dist.method), method = clust.method)
+  dd.row <- as.dendrogram(clust.row)
+  row.ord <- order.dendrogram(dd.row)
+  ordered_row_names <- row.names(heatmap.mtrx[row.ord, ])
+  dendro_data_row <- dendro_data(dd.row, type = "rectangle")
+  
+  gene.clust <- cutree(clust.row, k = k)
+  clust.df <- data.frame(label=names(gene.clust), cluster=factor(gene.clust))
+  dendro_data_row[["labels"]]   <- merge(dendro_data_row[["labels"]],clust.df, by="label")
+  rect <- aggregate(x~cluster,label(dendro_data_row),range)
+  rect <- data.frame(rect$cluster,rect$x)
+  rect$mid <- rowMeans(rect[, c(2, 3)])
+  ymax <- mean(clust.row$height[length(clust.row$height)-((k-2):(k-1))])
+  
+  return(list('ordered_row_names' = ordered_row_names,
+              'dendro_data_row' = dendro_data_row,
+              'gene.clust' = gene.clust,
+              'rect' = rect,
+              'ymax' = ymax))
+}
+
+# col dendrograms
+heatmap.dendro.col <- function(heatmap.mtrx, dist.method = 'euclidean', clust.method = 'ward.D2')
+{
+  clust.col <- hclust(dist(t(heatmap.mtrx), method = dist.method), method = clust.method)
+  dd.col <- as.dendrogram(clust.col)
+  col.ord <- order.dendrogram(dd.col)
+  ordered_col_names <- colnames(heatmap.mtrx[, col.ord])
+  dendro_data_col <- dendro_data(dd.col, type = "rectangle")
+  return(list('ordered_col_names' = ordered_col_names,
+              'dendro_data_col' = dendro_data_col))
+}
+
+# GO enrichment
+GOenrich <- function(genesInterest, geneUniverse, onto = 'BP')
+{
+  # GO enrichment - Biological Processes
+  # specifiy gene list within gene universie
+  #geneUniverse <- mcols(araport11.genes.GR)$gene
+  geneList <- factor(as.integer(geneUniverse %in% genesInterest))
+  names(geneList) <- geneUniverse
+
+  # build GO dataset with TAIR annotation
+  GO.dat <- new('topGOdata',
+                description = 'gwas results GO',
+                ontology = onto,
+                allGenes = geneList,
+                annot = annFUN.org,
+                mapping = 'org.At.tair.db',
+                nodeSize = 5)
+
+  resultClassic <- runTest(GO.dat, algorithm = "classic", statistic = "fisher")
+  resultWeight01 <- runTest(GO.dat, algorithm = "weight01", statistic = "fisher")
+  resultElim <- runTest(GO.dat, algorithm = "elim", statistic = "fisher")
+  resultWeight <- runTest(GO.dat, algorithm = "weight", statistic = "fisher")
+  
+  GOresults <- list(classic = resultClassic, weight01 = resultWeight01, elim = resultElim, weight = resultWeight)
+  
+  # gather data
+  allRes <- GenTable(GO.dat,
+                     classic = GOresults$classic,
+                     weight01 = GOresults$weight01,
+                     elim = GOresults$elim,
+                     weight = GOresults$weight,
+                     orderBy = 'classic',
+                     ranksOf = 'weight01',
+                     topNodes = length(usedGO(GO.dat)))
+  
+  # filter for significance
+  allRes.filt <- as_tibble(allRes) %>%
+    mutate(classic = as.numeric(classic),
+           weight01 = as.numeric(weight01),
+           elim = as.numeric(elim),
+           weight = as.numeric(weight)) %>%
+    filter(classic <= 0.1 | weight01 <= 0.1 | elim <= 0.1 | weight <= 0.1)
+  
+  return(allRes.filt)
+}
+```
+
+```{r general variables}
+temperatures <- c('16C', '6C')
+```
+
+```{r expression data}
+# data
+expression.files <- file.path('/groups/nordborg/projects/cegs/16Vs6C/Results/SalmonQuant/', samples$basename, '' ,'_quasiMap_pseudoG_Trimmed/quant.sf', fsep = '')
+names(expression.files) <- samples$sample
+
+# transcript <-> gene
+tx2gene <- data.frame('transcriptID' = sub(".*id ", "", Araport11$attributes), 'geneID' = Araport11$V10)
+
+# import salmon quantification data
+samples.acn1 <- samples$sample[samples$accession %in% unique(samples$accession)[1]]
+txi <- tximport(expression.files[samples.acn1], tx2gene = tx2gene, type = 'salmon', dropInfReps = T)
+for (acn in unique(samples$accession)[-1])
+{
+  samples.acn <- samples$sample[samples$accession %in% acn]
+  txi.acn <- tximport(expression.files[samples.acn], tx2gene = tx2gene, type = 'salmon', dropInfReps = T)
+  # use overlapping genes
+  idx <- intersect(rownames(txi$counts), rownames(txi.acn$counts))
+  txi$abundance <- cbind(txi$abundance[idx, ], txi.acn$abundance[idx, ])
+  txi$counts <- cbind(txi$counts[idx, ], txi.acn$counts[idx, ])
+  txi$length <- cbind(txi$length[idx, ], txi.acn$length[idx, ])
+}
+
+#match Colnames with samples order
+txi$abundance <- txi$abundance[ ,samples$sample]
+txi$counts <- txi$counts[ ,samples$sample]
+txi$length <- txi$length[ ,samples$sample]
+```
+
+```{r create DESeq DataSet}
+dds.full <- DESeqDataSetFromTximport(txi, colData = samples, design = ~  replicate + accession + temperature + replicate:temperature + accession:temperature)
+idx <- rowSums(counts(dds.full) >= 10 ) >= nrow(samples) * 0.1
+dds.full <- dds.full[idx,]
+```
+```{r variance stabilising transformation}
+dds.varStab <- varianceStabilizingTransformation(dds.full, blind=F)
+meanSdPlot(assay(dds.varStab))
+```
+
+```{r heatmap of GxE}
+# prepare data
+dds.GxE <- as_tibble(assay(dds.varStab), rownames = 'gene') %>%
+  filter(gene %in% GxE.genes) %>%
+  pivot_longer(cols = !'gene', names_to = 'sample', values_to = 'expression') %>%
+  left_join(., samples[, c('sample', 'accession', 'temperature', 'replicate', 'sampleName')], by = 'sample') %>%
+  dplyr::select(gene, sample, accession, temperature, expression) %>%
+  group_by(accession, temperature, gene) %>%
+  summarise(mean(expression), .groups = 'drop') %>%
+  mutate(acnTemp = paste(accession, temperature, sep = '_'), expression = `mean(expression)`) %>%
+  dplyr::select(-`mean(expression)`) %>%
+  group_by(gene) %>%
+  mutate(expression = scale(expression))
+  
+# Convert to a matrix for clustering
+dds.GxE.wide <- dds.GxE %>%
+  dplyr::select(gene, acnTemp, expression) %>%
+  pivot_wider(id_cols = gene, names_from = acnTemp, values_from = expression)
+
+dds.GxE.mtrx <- as.matrix(dds.GxE.wide[, -1])
+rownames(dds.GxE.mtrx) <- dds.GxE.wide$gene
+
+# climate annotation
+clim.annot <- mutate(samples, acnTemp = paste(accession, temperature, sep = '_')) %>%
+  dplyr::select(acnTemp, bio_11) %>%
+  distinct()
+clim.annot <-data.frame(bio_11 = clim.annot$bio_11, row.names = clim.annot$acnTemp)
+
+
+dds.GxE.long <- pivot_longer(dds.GxE.wide, values_to = 'expression', names_to = 'acn_temp', cols = -gene)
+
+# Cluster rows
+k <- 21
+clust.row <- hclust(dist(dds.GxE.mtrx, method = 'euclidean'), method = 'ward.D2')
+dd.row <- as.dendrogram(clust.row)
+row.ord <- order.dendrogram(dd.row)
+ordered_row_names <- row.names(dds.GxE.mtrx[row.ord, ])
+dds.GxE.long$gene <- factor(dds.GxE.long$gene, levels = ordered_row_names)
+dendro_data_row <- dendro_data(dd.row, type = "rectangle")
+
+gene.clust <- cutree(clust.row, k = k)
+clust.df <- data.frame(label=names(gene.clust), cluster=factor(gene.clust))
+clust.df$label <- factor(clust.df$label, levels = ordered_row_names, ordered = T)
+clust.df <- clust.df[order(clust.df$label, decreasing = T), ]
+clust.df$cluster.name <- as.numeric(factor(clust.df$cluster, levels = unique(clust.df$cluster)))
+dendro_data_row[["labels"]]   <- merge(dendro_data_row[["labels"]],clust.df, by="label")
+rect <- aggregate(x~cluster.name,label(dendro_data_row),range)
+rect <- data.frame(rect$cluster.name,rect$x)
+rect$mid <- rowMeans(rect[, c(2, 3)])
+ymax <- mean(clust.row$height[length(clust.row$height)-((k-2):(k-1))])
+
+    
+# Cluster columns
+clust.col <- hclust(dist(t(dds.GxE.mtrx), method = 'euclidean'), method = 'ward.D2')
+dd.col <- as.dendrogram(clust.col)
+col.ord <- order.dendrogram(dd.col)
+ordered_col_names <- colnames(dds.GxE.mtrx[, col.ord])
+dds.GxE.long$acn_temp <- factor(dds.GxE.long$acn_temp, levels = ordered_col_names)
+
+heat_plot <- ggplot(dds.GxE.long, aes(x = acn_temp, y = gene, fill = expression)) + 
+  geom_tile() +
+  xlab("") + 
+	ylab("") +
+  labs(fill = 'gene-wide\nstandardized\nexpression') +
+	theme_minimal() + 
+  theme(text = element_text(size = 10),
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5),
+        axis.text.y = element_blank(),
+        axis.line  = element_blank(),
+        axis.ticks = element_blank(),
+        panel.grid = element_blank(),
+        panel.border = element_blank()) +
+  scale_fill_viridis(discrete = F)
+
+dendro_row_box <- axis_canvas(heat_plot, axis = "y", coord_flip = TRUE) + 
+  geom_segment(data = segment(dendro_data_row), aes(y = -y, x = x, xend = xend, yend = -yend), size = 0.2) +
+  geom_rect(data = rect, aes(xmin=X1-0.3, xmax=X2+0.3, ymin = -ymax - 2, ymax = 0), 
+            color=wes_palette('Darjeeling1')[1], fill=NA, size = 0.1) +
+  geom_text(data = rect, aes(x = mid, y = -ymax - 2.7 , label = rect.cluster.name), col = wes_palette('Darjeeling1')[1]) +
+  coord_flip() +
+  theme_dendro()
+
+dendro_row <- axis_canvas(heat_plot, axis = "y", coord_flip = T) + 
+  geom_segment(data = segment(dendro_data_row), aes(y = -y, x = x, xend = xend, yend = -yend), size = 0.2) +
+  coord_flip() +
+  theme_dendro()
+  
+
+# annotate bio11
+bio11.annot <- tibble(acnTemp = ordered_col_names) %>%
+  separate(acnTemp, c('accession', NA), remove = F) %>%
+  left_join(., dplyr::select(worldclim, accession, bio_11), by = 'accession') %>%
+  mutate(sampleNr = c(1:length(acnTemp))) %>%
+  dplyr::select(-accession)
+
+bio11_col_annot <- axis_canvas(heat_plot, axis = 'x', data = bio11.annot, mapping = aes(x = sampleNr)) +
+  geom_tile(aes(y = 1, fill = bio_11)) +
+  theme(legend.position = 'right',
+        legend.direction = 'horizontal',
+        legend.key.height = unit(0.5, 'lines'),
+        legend.key.width = unit(1, 'lines'),
+        legend.title = element_blank())
+bio11_col_annot.lgnd <- cowplot::get_legend(bio11_col_annot)
+
+dendro_data_col <- dendro_data(dd.col, type = "rectangle")
+dendro_col <- axis_canvas(heat_plot, axis = "x") + 
+  geom_segment(data = segment(dendro_data_col), aes(x = x, y = y, xend = xend, yend = yend), size = 0.2)
+
+# plot heatmap
+final_plot <- heat_plot
+
+# create empty plot for heatmap/ climate annotation separation
+pnull <- ggdraw()
+
+# add sample dendrogram and climayte annotation to heatmap
+final_plot <- 
+  insert_xaxis_grob(
+    insert_xaxis_grob(
+      insert_xaxis_grob(
+        final_plot, dendro_col, unit(0.2, "null"), position = "top"),
+      bio11_col_annot, unit(0.02, "null"), position = 'top'),
+    pnull, unit(0.01, 'null'), position = 'top')
+
+# add gene dendrogram  with clusters to heatmap
+final_plot <- insert_yaxis_grob(final_plot, dendro_row_box, unit(0.2, "null"), position = "left")
+
+p <- ggdraw(final_plot) +
+  draw_grob(bio11_col_annot.lgnd, scale = 0.5, x = 0.42, y = 0.31) +
+  draw_text('temp. coldest quart.', x = 0.92, y = 0.89, size = 10)
+
+#ggsave(filename = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Transcriptome/GxEregulon/plots/heatmap_GxE.ParkEtAl.pdf',
+#       plot = p)
+
+print(p)
+
+
+GxE.gene.clusters <- map(c(1:max(clust.df$cluster.name)),                          function(i){clust.df$label[clust.df$cluster.name == i]})
+```
+- first split between temperatures
+- @6C: accessions from warmer climates cluster together
+- @16C: N-SWE accessions cluster toegther
+
+```{r boxplots cluster - bio11 accession order}
+GxE.clusters.bxplts <- imap(GxE.gene.clusters, function(GxE.gene.clstr, i){
+  GxE.gene.clstr <- as_tibble(assay(dds.varStab), rownames = 'gene') %>%
+    filter(gene %in% GxE.gene.clstr) %>%
+    pivot_longer(cols = !'gene', names_to = 'sample', values_to = 'expression') %>%
+    left_join(., samples[, c('sample', 'accession', 'temperature', 'replicate', 'sampleName')], by = 'sample') %>%
+    dplyr::select(gene, sample, accession, temperature, expression) %>%
+    #group_by(accession, temperature, gene) %>%
+    #summarise(mean(expression), .groups = 'drop') %>%
+    #mutate(acnTemp = paste(accession, temperature, sep = '_'), expression = `mean(expression)`) %>%
+    mutate(acnTemp = paste(accession, temperature, sep = '_')) %>%
+    #dplyr::select(-`mean(expression)`) %>%
+    group_by(gene) %>%
+    mutate(expression = scale(expression)) %>%
+    ungroup() %>%
+    left_join(., dplyr::select(worldclim, accession, bio_11), by = 'accession') %>%
+    arrange(bio_11) %>%
+    mutate(accession = factor(accession, levels = unique(accession), ordered = T))
+  clstr.bxplt <- ggplot(GxE.gene.clstr, aes(x = accession, y = expression, color = temperature)) +
+    geom_boxplot() +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+          text = element_text(size = 12),
+          legend.position = 'right')
+  
+  bxplt.lgnd <- cowplot::get_legend(clstr.bxplt)
+  clstr.bxplt <- clstr.bxplt + theme(legend.position = 'null')
+  
+  # annotate bio11
+  bio11 <- GxE.gene.clstr %>%
+    dplyr::select(accession, bio_11) %>%
+    distinct() %>%
+    mutate(accession.nr = c(1:length(accession)))
+  
+  bio11.axis.x <- axis_canvas(clstr.bxplt, axis = 'x', data = bio11, mapping = aes(x = accession.nr)) +
+    geom_tile(aes(y = 1, fill = bio_11)) +
+    labs(fill = 'mean temperature\nof coldest quarter\n(ºC)') +
+    theme(legend.position = 'right',
+          legend.direction = 'vertical',
+          legend.key.height = unit(1, 'lines'),
+          legend.key.width = unit(0.5, 'lines'),
+          text = element_text(size = 12))
+  
+  bio11.lgnd <- cowplot::get_legend(bio11.axis.x)
+  
+  bxplt <- insert_xaxis_grob(clstr.bxplt, bio11.axis.x, unit(0.02, 'null'), position = 'bottom')
+  
+  p <- ggdraw(plot_grid(
+    bxplt,
+    plot_grid(
+      bxplt.lgnd, bio11.lgnd, NULL, nrow = 3, align = 'v'), rel_widths = c(1, 0.25)))
+  #ggsave(filename = paste('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Transcriptome/GxEregulon/plots/boxplot_GxE_ParkEtAl_cluster_',i, '.pdf', sep = ''), width = 14)
+  print(p)
+  return(p)
+})
+```
+```{r correlations with bio_11 per cluster}
+GxE.clusters.bio11 <- imap(GxE.gene.clusters, function(clstr.genes, i){
+  cluster.size <- length(clstr.genes)
+  GxE.gene.cluster <- as_tibble(assay(dds.varStab), rownames = 'gene') %>%
+    filter(gene %in% clstr.genes) %>%
+    pivot_longer(cols = !'gene', names_to = 'sample', values_to = 'expression') %>%
+    left_join(., samples[, c('sample', 'accession', 'temperature', 'replicate', 'sampleName')], by = 'sample') %>%
+    dplyr::select(gene, sample, accession, replicate, temperature, expression) %>%
+    #group_by(accession, temperature, gene) %>%
+    #summarise(mean(expression), .groups = 'drop') %>%
+    #mutate(acnTemp = paste(accession, temperature, sep = '_'), expression = `mean(expression)`) %>%
+    mutate(acnTemp = paste(accession, temperature, sep = '_')) %>%
+    #dplyr::select(-`mean(expression)`) %>%
+    group_by(gene) %>%
+    mutate(expression = scale(expression)) %>%
+    ungroup() %>%
+    left_join(., dplyr::select(worldclim, accession, bio_11), by = 'accession')
+    
+    clstr.bio11 <- ggplot(GxE.gene.cluster, aes(x = bio_11, y = expression, color = temperature)) +
+      geom_point() +
+      geom_line(aes(group = interaction(gene, replicate, temperature)), size = 0.1, alpha = 0.5) +
+      geom_smooth(method = 'lm', se = F) +
+      stat_cor(method = 'pearson') +
+      labs(x = 'mean temperature of coldest quarter (ºC)',
+           y = 'gene-wide standardized expression',
+           title = paste0('cluster ', i, ' (', cluster.size, ')')) +
+      theme_classic() +
+      theme(text = element_text(size = 14),
+          legend.position = 'right')
+    
+
+  #ggsave(filename = paste('/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Transcriptome/GxEregulon/plots/corr_bio11_GxE_ParkEtAl_cluster_',i, '.pdf', sep = ''), width = 14, height = 6)
+  print(clstr.bio11)
+  return(clstr.bio11)
+})
+
+# save all together
+clstr.bio11.combo <- ggarrange(plotlist = GxE.clusters.bio11,
+                               ncol = 2,
+                               nrow = 4,
+                               common.legend = T,
+                               legend = 'bottom',
+                               labels = 'AUTO')
+
+#ggsave(filename = '/groups/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Results/Transcriptome/GxEregulon/plots/corr_bio11_GxE_ParkEtAl_clusters_combo.pdf',
+#      plot = clstr.bio11.combo,
+#      width = 21,
+#      height = 21)
+
+
+```
+
+
+```{r GO enrichment clusters - genome-wide}
+geneUniverse <- unique(Araport11$V10)
+GxE.gene.clusters.GO <- map(GxE.gene.clusters, GOenrich, onto = 'BP', geneUniverse = geneUniverse)
+
+GxE.gene.clusters.GO
+```
+
+```{r GO enrichment clusters - GxE only}
+geneUniverse <- GxE.genes
+GxE.gene.clusters.GO.GxE <- map(GxE.gene.clusters, GOenrich, onto = 'BP', geneUniverse = geneUniverse)
+
+GxE.gene.clusters.GO.GxE
+```
+
